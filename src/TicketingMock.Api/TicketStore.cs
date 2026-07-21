@@ -6,6 +6,10 @@ namespace TicketingMock.Api;
 /// The whole "database": an in-memory dictionary of tickets. Not persisted — restarting
 /// the app resets it to the seed data. Public base URL is used to build shareable ticket
 /// links so the assistant can hand the user a URL that opens this app's board.
+///
+/// Reads and writes are scoped by <c>owner</c> (the X-User-Id passed by the caller): a
+/// null/empty owner sees everything (the admin board), otherwise only that user's tickets.
+/// This is a test-only stand-in for real per-user authorization.
 /// </summary>
 public sealed class TicketStore
 {
@@ -19,20 +23,27 @@ public sealed class TicketStore
         Seed();
     }
 
-    public IReadOnlyList<MockTicket> All() =>
-        _tickets.Values.OrderByDescending(t => t.CreatedAt).ToList();
+    private static bool OwnedBy(MockTicket ticket, string? owner) =>
+        string.IsNullOrEmpty(owner) || string.Equals(ticket.Owner, owner, StringComparison.OrdinalIgnoreCase);
 
-    public MockTicket? Get(string id) =>
-        _tickets.GetValueOrDefault(id);
+    public IReadOnlyList<MockTicket> All(string? owner) =>
+        _tickets.Values
+            .Where(t => OwnedBy(t, owner))
+            .OrderByDescending(t => t.CreatedAt)
+            .ToList();
 
-    public IReadOnlyList<MockTicket> Search(string query)
+    public MockTicket? Get(string id, string? owner) =>
+        _tickets.TryGetValue(id, out var ticket) && OwnedBy(ticket, owner) ? ticket : null;
+
+    public IReadOnlyList<MockTicket> Search(string query, string? owner)
     {
         if (string.IsNullOrWhiteSpace(query))
         {
-            return All();
+            return All(owner);
         }
 
         return _tickets.Values
+            .Where(t => OwnedBy(t, owner))
             .Where(t => t.Title.Contains(query, StringComparison.OrdinalIgnoreCase)
                         || (t.Description?.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false)
                         || t.Labels.Any(l => l.Contains(query, StringComparison.OrdinalIgnoreCase)))
@@ -40,7 +51,7 @@ public sealed class TicketStore
             .ToList();
     }
 
-    public MockTicket Create(CreateTicketBody body)
+    public MockTicket Create(CreateTicketBody body, string? owner)
     {
         var id = $"PROJ-{Interlocked.Increment(ref _sequence)}";
         var ticket = new MockTicket
@@ -52,6 +63,7 @@ public sealed class TicketStore
             Priority = string.IsNullOrWhiteSpace(body.Priority) ? "Medium" : body.Priority,
             Assignee = body.Assignee,
             Reporter = "ticket-assistant",
+            Owner = owner,
             Labels = body.Labels ?? [],
             CreatedAt = DateTimeOffset.UtcNow,
             Url = $"{_publicBaseUrl}/#{id}"
@@ -61,20 +73,21 @@ public sealed class TicketStore
         return ticket;
     }
 
-    public MockTicket? UpdateStatus(string id, string status)
+    public MockTicket? UpdateStatus(string id, string status, string? owner)
     {
-        if (_tickets.TryGetValue(id, out var ticket))
+        if (Get(id, owner) is not { } ticket)
         {
-            ticket.Status = status;
-            ticket.UpdatedAt = DateTimeOffset.UtcNow;
+            return null;
         }
 
+        ticket.Status = status;
+        ticket.UpdatedAt = DateTimeOffset.UtcNow;
         return ticket;
     }
 
-    public MockComment? AddComment(string id, string author, string body)
+    public MockComment? AddComment(string id, string author, string body, string? owner)
     {
-        if (!_tickets.TryGetValue(id, out var ticket))
+        if (Get(id, owner) is not { } ticket)
         {
             return null;
         }
@@ -85,16 +98,18 @@ public sealed class TicketStore
         return comment;
     }
 
+    // Demo data owned by "alice" so the default console user sees a populated board;
+    // switch the user in the console to see isolation (a different user starts empty).
     private void Seed()
     {
         Create(new CreateTicketBody(
             "Login page returns 500 on submit",
             "Users report an intermittent 500 error when submitting the login form.",
-            "High", "alice", ["bug", "auth"]));
+            "High", "alice", ["bug", "auth"]), owner: "alice");
 
         Create(new CreateTicketBody(
             "Add dark mode to settings",
             "Feature request: a dark theme toggle on the settings screen.",
-            "Low", null, ["enhancement", "ui"]));
+            "Low", null, ["enhancement", "ui"]), owner: "alice");
     }
 }

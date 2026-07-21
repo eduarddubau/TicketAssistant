@@ -14,6 +14,9 @@ public sealed class MockTicket
     public string Priority { get; set; } = "Medium";
     public string? Assignee { get; set; }
     public string? Reporter { get; set; }
+
+    /// <summary>Identifier of the user who created the ticket; reads are scoped to this.</summary>
+    public string? Owner { get; set; }
     public List<string> Labels { get; set; } = [];
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? UpdatedAt { get; set; }

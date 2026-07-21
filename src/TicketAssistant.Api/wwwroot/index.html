@@ -42,12 +42,15 @@
     #input { flex: 1; padding: .6rem .8rem; border-radius: 8px; border: 1px solid color-mix(in srgb, CanvasText 25%, transparent); background: Canvas; color: inherit; font: inherit; }
     #send { padding: .6rem 1.1rem; border-radius: 8px; border: none; background: #2563eb; color: #fff; font-weight: 600; cursor: pointer; }
     #send:disabled { opacity: .5; cursor: default; }
+    .user-box { display: flex; align-items: center; gap: .35rem; font-size: .8rem; opacity: .85; }
+    #user { width: 8rem; padding: .3rem .5rem; border-radius: 6px; border: 1px solid color-mix(in srgb, CanvasText 25%, transparent); background: Canvas; color: inherit; font: inherit; font-size: .8rem; }
   </style>
 </head>
 <body>
   <header>
     <h1>TicketAssistant</h1>
     <span class="cid" id="cid">no conversation</span>
+    <label class="user-box">👤 user <input id="user" title="You only see tickets created by this user. Change it to test isolation." /></label>
     <button id="reset" type="button">New conversation</button>
   </header>
 
@@ -64,7 +67,18 @@
     const input = document.getElementById('input');
     const send = document.getElementById('send');
     const cidLabel = document.getElementById('cid');
+    const userInput = document.getElementById('user');
     let conversationId = null;
+
+    // Identifies the current user; the API scopes tickets to whoever this is. Persisted so
+    // a reload keeps the same identity; editable so you can switch users to test isolation.
+    let userId = localStorage.getItem('ta-user') || 'alice';
+    userInput.value = userId;
+
+    // fetch wrapper that tags every request with the current user.
+    function api(url, options = {}) {
+      return fetch(url, { ...options, headers: { ...(options.headers || {}), 'X-User-Id': userId } });
+    }
 
     function add(cls, text) {
       const el = document.createElement('div');
@@ -76,12 +90,12 @@
     }
 
     async function newConversation() {
-      const res = await fetch('/api/conversations', { method: 'POST' });
+      const res = await api('/api/conversations', { method: 'POST' });
       const data = await res.json();
       conversationId = data.conversationId;
       cidLabel.textContent = conversationId;
       log.innerHTML = '';
-      add('tool', 'conversation ' + conversationId);
+      add('tool', 'conversation ' + conversationId + ' · user: ' + userId);
     }
 
     // Reads an SSE (text/event-stream) response body and dispatches each JSON event.
@@ -123,7 +137,7 @@
         add('tool', approved ? 'approved create_ticket' : 'declined create_ticket');
         lock(true);
         try {
-          const res = await fetch('/api/conversations/' + conversationId + '/confirm', {
+          const res = await api('/api/conversations/' + conversationId + '/confirm', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ callId: evt.callId, approved })
@@ -149,7 +163,7 @@
       input.value = '';
       lock(true);
       try {
-        const res = await fetch('/api/conversations/' + conversationId + '/messages', {
+        const res = await api('/api/conversations/' + conversationId + '/messages', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ text })
@@ -158,6 +172,16 @@
       } catch (e) { add('err', String(e)); }
       lock(false);
     });
+
+    function switchUser() {
+      const next = userInput.value.trim() || 'alice';
+      userInput.value = next;
+      if (next === userId) return;
+      userId = next;
+      localStorage.setItem('ta-user', userId);
+      newConversation();   // new context so history doesn't leak across users
+    }
+    userInput.addEventListener('change', switchUser);
 
     document.getElementById('reset').onclick = newConversation;
     newConversation();

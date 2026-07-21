@@ -82,6 +82,7 @@
         ${t.description ? `<p class="desc">${esc(t.description)}</p>` : ''}
         ${labels ? `<div class="labels">${labels}</div>` : ''}
         <div class="meta">
+          <span>🧑‍💻 owner: ${esc(t.owner || '—')}</span>
           <span>👤 ${esc(t.assignee || 'unassigned')}</span>
           <span>💬 ${comments}</span>
           <span>🕓 ${timeAgo(t.createdAt)}</span>

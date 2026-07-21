@@ -15,6 +15,8 @@ builder.Services.AddCors(options => options.AddPolicy(AngularDevCorsPolicy, poli
     policy.WithOrigins("http://localhost:4200").AllowAnyMethod().AllowAnyHeader()));
 
 builder.Services.AddOpenApi();
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddTransient<UserIdForwardingHandler>();
 
 // Tickets:Backend switches the ITicketProvider implementation. "Http" (default) calls an
 // external ticketing system over REST (the TicketingMock.Api service in this repo);
@@ -28,7 +30,8 @@ else
 {
     var ticketsBaseUrl = builder.Configuration["Tickets:Http:BaseUrl"] ?? "http://localhost:5090";
     builder.Services.AddHttpClient<ITicketProvider, HttpTicketProvider>(
-        c => c.BaseAddress = new Uri(ticketsBaseUrl));
+            c => c.BaseAddress = new Uri(ticketsBaseUrl))
+        .AddHttpMessageHandler<UserIdForwardingHandler>();
 }
 
 // Llm:Provider selects the chat backend behind the single IChatClient abstraction:
