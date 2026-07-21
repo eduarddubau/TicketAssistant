@@ -1,0 +1,11 @@
+# Secrets
+.env
+
+# .NET build output
+bin/
+obj/
+
+# IDE
+.vs/
+.vscode/
+*.user
