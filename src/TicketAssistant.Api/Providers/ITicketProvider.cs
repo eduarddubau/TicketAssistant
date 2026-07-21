@@ -39,4 +39,10 @@ public interface ITicketProvider
 
     /// <summary>Append a comment to a ticket and return the stored comment.</summary>
     Task<TicketComment> AddCommentAsync(string ticketId, string body, CancellationToken ct = default);
+
+    /// <summary>Delete a ticket outright. Exists so a mistaken create can be undone.</summary>
+    Task DeleteTicketAsync(string ticketId, CancellationToken ct = default);
+
+    /// <summary>Remove a ticket's most recent comment. Exists so a comment can be undone.</summary>
+    Task DeleteLastCommentAsync(string ticketId, CancellationToken ct = default);
 }

@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.AI;
 using TicketAssistant.Api.Models;
@@ -25,6 +26,7 @@ public sealed class OrchestrationLoop(
     IChatClient chatClient,
     IReadOnlyList<AIFunction> tools,
     ITicketProvider provider,
+    UndoStore undo,
     ILogger<OrchestrationLoop> logger)
 {
     // Same tools, indexed by name so we can look up the one the model asked for in O(1).
@@ -88,7 +90,13 @@ public sealed class OrchestrationLoop(
                 call.Name,
                 edits is { Count: > 0 } ? $" with edits to: {string.Join(", ", edits.Keys)}" : " unchanged");
 
+            // Snapshot the ticket before we change it, so "undo that" can restore the old value.
+            var ticketId = ArgString(arguments, "ticketId");
+            var before = ticketId is null ? null : await TryGetTicketAsync(ticketId, ct);
+
             result = await InvokeToolAsync(_toolsByName[call.Name], call, ct);
+
+            RecordUndo(call.Name, before, result);
         }
         else
         {
@@ -258,6 +266,92 @@ public sealed class OrchestrationLoop(
                     pendingConfirmation.CallId, pendingConfirmation.Name, pendingArguments!);
                 yield break;
             }
+        }
+    }
+
+    /// <summary>
+    /// Pulls a ticket id out of whatever a tool returned. AIFunction.InvokeAsync hands back the
+    /// result already serialized (a JsonElement) rather than the original CanonicalTicket, so we
+    /// accept either shape instead of assuming one.
+    /// </summary>
+    private static string? ExtractTicketId(object? result) => result switch
+    {
+        CanonicalTicket ticket => ticket.Id,
+        JsonElement { ValueKind: JsonValueKind.Object } json =>
+            json.TryGetProperty("id", out var lower) ? lower.GetString()
+            : json.TryGetProperty("Id", out var upper) ? upper.GetString()
+            : null,
+        _ => null
+    };
+
+    /// <summary>Fetches a ticket for the "before" snapshot, returning null if it can't be read.</summary>
+    private async Task<CanonicalTicket?> TryGetTicketAsync(string ticketId, CancellationToken ct)
+    {
+        try
+        {
+            return await provider.GetTicketAsync(ticketId, ct);
+        }
+        catch
+        {
+            return null; // undo is best-effort; never fail the real action over it
+        }
+    }
+
+    /// <summary>
+    /// After a successful write, remember how to reverse it so undo_last_action can offer it.
+    /// A write we don't know how to reverse clears any stale undo rather than leaving one that
+    /// would revert the wrong thing.
+    /// </summary>
+    private void RecordUndo(string toolName, CanonicalTicket? before, object? result)
+    {
+        // A failed tool call returns an "Error: ..." string — nothing changed, nothing to undo.
+        if (result is string)
+        {
+            return;
+        }
+
+        logger.LogDebug("RecordUndo for {Tool}: result is {ResultType}", toolName, result?.GetType().Name ?? "null");
+
+        switch (toolName)
+        {
+            case TicketTools.CreateTicketToolName when ExtractTicketId(result) is { } createdId:
+                undo.Record(new UndoAction(
+                    $"created ticket {createdId} (it will be deleted)",
+                    (p, c) => p.DeleteTicketAsync(createdId, c)));
+                break;
+
+            case TicketTools.UpdateStatusToolName when before is not null:
+                undo.Record(new UndoAction(
+                    $"status change on {before.Id} (restoring {before.Status})",
+                    (p, c) => p.UpdateTicketStatusAsync(before.Id, before.Status, c)));
+                break;
+
+            case TicketTools.AssignTicketToolName when before is not null:
+                undo.Record(new UndoAction(
+                    $"assignment on {before.Id} (restoring {before.Assignee ?? "unassigned"})",
+                    (p, c) => p.AssignTicketAsync(before.Id, before.Assignee, c)));
+                break;
+
+            case TicketTools.ResolveTicketToolName when before is not null:
+                // resolve = status change + comment, so undo both.
+                undo.Record(new UndoAction(
+                    $"resolution of {before.Id} (restoring {before.Status} and removing the note)",
+                    async (p, c) =>
+                    {
+                        await p.UpdateTicketStatusAsync(before.Id, before.Status, c);
+                        await p.DeleteLastCommentAsync(before.Id, c);
+                    }));
+                break;
+
+            case TicketTools.AddCommentToolName when before is not null:
+                undo.Record(new UndoAction(
+                    $"comment on {before.Id} (it will be removed)",
+                    (p, c) => p.DeleteLastCommentAsync(before.Id, c)));
+                break;
+
+            default:
+                undo.Clear();
+                break;
         }
     }
 

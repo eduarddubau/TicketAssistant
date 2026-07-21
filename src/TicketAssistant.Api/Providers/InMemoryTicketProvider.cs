@@ -95,6 +95,15 @@ public sealed class InMemoryTicketProvider : ITicketProvider
         return Task.FromResult(next);
     }
 
+    public Task DeleteTicketAsync(string ticketId, CancellationToken ct = default)
+    {
+        _tickets.TryRemove(ticketId, out _);
+        return Task.CompletedTask;
+    }
+
+    // This stub doesn't retain comments, so there's nothing to remove.
+    public Task DeleteLastCommentAsync(string ticketId, CancellationToken ct = default) => Task.CompletedTask;
+
     public Task<CanonicalTicket> AssignTicketAsync(string ticketId, string? assignee, CancellationToken ct = default)
     {
         if (!_tickets.TryGetValue(ticketId, out var existing))

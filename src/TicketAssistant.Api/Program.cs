@@ -87,7 +87,9 @@ builder.Services.AddSingleton<IChatClient>(sp =>
 // Build the tool menu from whichever provider was registered above, then the loop (which
 // takes the chat client + tools + provider) and the conversation memory. All singletons:
 // one shared instance for the app's lifetime.
-builder.Services.AddSingleton(sp => TicketTools.Build(sp.GetRequiredService<ITicketProvider>()));
+builder.Services.AddSingleton<UndoStore>();
+builder.Services.AddSingleton(sp =>
+    TicketTools.Build(sp.GetRequiredService<ITicketProvider>(), sp.GetRequiredService<UndoStore>()));
 builder.Services.AddSingleton<OrchestrationLoop>();
 builder.Services.AddSingleton<ConversationStore>();
 

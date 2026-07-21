@@ -122,6 +122,30 @@ public sealed class TicketStore
 
     // Demo data owned by "alice" so the default console user sees a populated board;
     // switch the user in the console to see isolation (a different user starts empty).
+    /// <summary>Removes a ticket entirely. Used to undo a create.</summary>
+    public bool Delete(string id, string? owner)
+    {
+        if (Get(id, owner) is null)
+        {
+            return false;
+        }
+
+        return _tickets.TryRemove(id, out _);
+    }
+
+    /// <summary>Removes the most recently added comment. Used to undo a comment.</summary>
+    public bool RemoveLastComment(string id, string? owner)
+    {
+        if (Get(id, owner) is not { } ticket || ticket.Comments.Count == 0)
+        {
+            return false;
+        }
+
+        ticket.Comments.RemoveAt(ticket.Comments.Count - 1);
+        ticket.UpdatedAt = DateTimeOffset.UtcNow;
+        return true;
+    }
+
     private void Seed()
     {
         Create(new CreateTicketBody(

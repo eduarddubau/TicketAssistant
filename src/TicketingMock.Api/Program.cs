@@ -38,4 +38,11 @@ app.MapPost("/api/tickets/{id}/comments", (string id, AddCommentBody body, HttpR
         ? Results.Ok(comment)
         : Results.NotFound());
 
+// Deletion endpoints exist to support the assistant's "undo last action".
+app.MapDelete("/api/tickets/{id}", (string id, HttpRequest req, TicketStore store) =>
+    store.Delete(id, Owner(req)) ? Results.NoContent() : Results.NotFound());
+
+app.MapDelete("/api/tickets/{id}/comments/last", (string id, HttpRequest req, TicketStore store) =>
+    store.RemoveLastComment(id, Owner(req)) ? Results.NoContent() : Results.NotFound());
+
 app.Run();

@@ -92,6 +92,18 @@ public sealed class HttpTicketProvider(HttpClient http) : ITicketProvider
         return new TicketComment { Author = dto.Author, Body = dto.Body, CreatedAt = dto.CreatedAt };
     }
 
+    public async Task DeleteTicketAsync(string ticketId, CancellationToken ct = default)
+    {
+        var response = await http.DeleteAsync($"/api/tickets/{ticketId}", ct);
+        response.EnsureSuccessStatusCode();
+    }
+
+    public async Task DeleteLastCommentAsync(string ticketId, CancellationToken ct = default)
+    {
+        var response = await http.DeleteAsync($"/api/tickets/{ticketId}/comments/last", ct);
+        response.EnsureSuccessStatusCode();
+    }
+
     // Converts the remote system's wire shape (strings for status/priority) into the app's
     // strongly-typed CanonicalTicket. Unknown status/priority text falls back to a sensible
     // default rather than throwing, so an unexpected value from the backend can't break a read.

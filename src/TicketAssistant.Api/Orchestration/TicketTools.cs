@@ -24,6 +24,7 @@ public static class TicketTools
     public const string AddCommentToolName = "add_comment";
     public const string ResolveTicketToolName = "resolve_ticket";
     public const string AssignTicketToolName = "assign_ticket";
+    public const string UndoToolName = "undo_last_action";
 
     // The tools that change a ticket and therefore need explicit user approval.
     private static readonly HashSet<string> ConfirmationRequiredTools =
@@ -41,10 +42,29 @@ public static class TicketTools
     /// inspects the lambda's parameters to generate the schema the model sees, so parameter
     /// names/types and the description text are effectively the model's API documentation.
     /// </summary>
-    public static IReadOnlyList<AIFunction> Build(ITicketProvider provider)
+    public static IReadOnlyList<AIFunction> Build(ITicketProvider provider, UndoStore undo)
     {
         return
         [
+            AIFunctionFactory.Create(
+                // Not in ConfirmationRequiredTools: asking to undo *is* the confirmation, so
+                // making the user approve a second dialog would just be friction.
+                async (CancellationToken ct) =>
+                {
+                    if (undo.Take() is not { } action)
+                    {
+                        return "There is nothing to undo.";
+                    }
+
+                    await action.Revert(provider, ct);
+                    return $"Undone: {action.Description}";
+                },
+                name: UndoToolName,
+                description: "Reverse the most recent change you made for this user — deletes a ticket " +
+                              "you just created, restores a previous status or assignee, or removes a " +
+                              "comment you just added. Only the single most recent change can be undone. " +
+                              "Use when the user says something like 'undo that' or 'never mind'."),
+
             AIFunctionFactory.Create(
                 (string ticketId, CancellationToken ct) => provider.GetTicketAsync(ticketId, ct),
                 name: "get_ticket",
