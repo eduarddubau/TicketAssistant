@@ -25,13 +25,14 @@ public static class TicketTools
     public const string ResolveTicketToolName = "resolve_ticket";
     public const string AssignTicketToolName = "assign_ticket";
     public const string UndoToolName = "undo_last_action";
+    public const string SetDueDateToolName = "set_due_date";
 
     // The tools that change a ticket and therefore need explicit user approval.
     private static readonly HashSet<string> ConfirmationRequiredTools =
         new(StringComparer.Ordinal)
         {
             CreateTicketToolName, UpdateStatusToolName, AddCommentToolName,
-            ResolveTicketToolName, AssignTicketToolName
+            ResolveTicketToolName, AssignTicketToolName, SetDueDateToolName
         };
 
     /// <summary>Whether a tool mutates a ticket and so needs the user to confirm it first.</summary>
@@ -120,6 +121,14 @@ public static class TicketTools
                 name: UpdateStatusToolName,
                 description: "Change an existing ticket's status. Never executed automatically — the " +
                               "caller shows the user a confirmation card and gets explicit approval first."),
+
+            AIFunctionFactory.Create(
+                (string ticketId, DateTimeOffset? dueAt, CancellationToken ct) =>
+                    provider.SetDueDateAsync(ticketId, dueAt, ct),
+                name: SetDueDateToolName,
+                description: "Set when a ticket is due, as a date (e.g. 2026-08-01). Omit dueAt to clear " +
+                              "the deadline. Never executed automatically — the caller shows the user a " +
+                              "confirmation card and gets explicit approval first."),
 
             AIFunctionFactory.Create(
                 (string ticketId, string? assignee, CancellationToken ct) =>

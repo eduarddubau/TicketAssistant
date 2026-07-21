@@ -45,6 +45,7 @@
     .history summary { font-size: 12px; opacity: .6; cursor: pointer; }
     .history ul { margin: .35rem 0 0; padding-left: 1.1rem; font-size: 12px; opacity: .75; }
     .history li { margin-bottom: .15rem; }
+    .overdue { color: #dc2626; font-weight: 600; opacity: 1; }
     .empty { grid-column: 1/-1; text-align: center; opacity: .5; padding: 3rem; }
   </style>
 </head>
@@ -72,6 +73,10 @@
       return Math.floor(s / 86400) + 'd ago';
     }
 
+    // Overdue = past its due date and not already finished.
+    const isOverdue = (t) => t.dueAt && new Date(t.dueAt) < new Date()
+      && t.status !== 'Resolved' && t.status !== 'Closed';
+
     function card(t) {
       const isFresh = !first && !seen.has(t.id);
       const labels = (t.labels || []).map(l => `<span class="label">${esc(l)}</span>`).join('');
@@ -97,6 +102,7 @@
           <span>👤 ${esc(t.assignee || 'unassigned')}</span>
           <span>💬 ${comments}</span>
           <span>🕓 ${timeAgo(t.createdAt)}</span>
+          ${t.dueAt ? `<span class="${isOverdue(t) ? 'overdue' : ''}">📅 due ${new Date(t.dueAt).toISOString().slice(0, 10)}${isOverdue(t) ? ' — OVERDUE' : ''}</span>` : ''}
         </div>
         ${historyHtml}
       </article>`;

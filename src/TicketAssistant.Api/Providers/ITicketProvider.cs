@@ -37,6 +37,9 @@ public interface ITicketProvider
     /// <summary>Assign the ticket to someone (null/empty unassigns it) and return it.</summary>
     Task<CanonicalTicket> AssignTicketAsync(string ticketId, string? assignee, CancellationToken ct = default);
 
+    /// <summary>Set or clear the ticket's due date and return it.</summary>
+    Task<CanonicalTicket> SetDueDateAsync(string ticketId, DateTimeOffset? dueAt, CancellationToken ct = default);
+
     /// <summary>Append a comment to a ticket and return the stored comment.</summary>
     Task<TicketComment> AddCommentAsync(string ticketId, string body, CancellationToken ct = default);
 

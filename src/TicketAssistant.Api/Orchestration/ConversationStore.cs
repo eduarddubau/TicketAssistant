@@ -38,6 +38,10 @@ public sealed class ConversationStore
         back to Open), add an update/comment to it, or create a separate new ticket. Only
         create a new one if the user explicitly asks for it.
 
+        Tickets may have a due date. When you list or summarize them, call out anything whose
+        due date has passed and that isn't Resolved or Closed as overdue, so it doesn't get
+        forgotten. Set or change a deadline with set_due_date.
+
         If the user asks how things stand — a summary, an overview, a status report, "what's
         outstanding?" — call list_tickets and reply with a short digest rather than dumping
         every field: how many tickets there are, the breakdown by status, and anything Urgent
@@ -63,6 +67,7 @@ public sealed class ConversationStore
         • Open a new ticket
         • Resolve a ticket with a note, or change its status — for example reopen it
         • Add a comment or update to a ticket
+        • Set a due date, and flag anything overdue
 
         A few things worth knowing:
         • I'll always show you a summary and ask before I change anything — and you can edit

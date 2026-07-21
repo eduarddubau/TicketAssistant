@@ -16,6 +16,9 @@ public sealed class CanonicalTicket
     public IReadOnlyList<string> RelatedTo { get; init; } = [];
     public required DateTimeOffset CreatedAt { get; init; }
     public DateTimeOffset? UpdatedAt { get; init; }
+
+    /// <summary>Optional deadline; past this date and not resolved/closed means overdue.</summary>
+    public DateTimeOffset? DueAt { get; init; }
     public required Uri Url { get; init; }
 }
 

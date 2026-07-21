@@ -95,6 +95,35 @@ public sealed class InMemoryTicketProvider : ITicketProvider
         return Task.FromResult(next);
     }
 
+    public Task<CanonicalTicket> SetDueDateAsync(string ticketId, DateTimeOffset? dueAt, CancellationToken ct = default)
+    {
+        if (!_tickets.TryGetValue(ticketId, out var existing))
+        {
+            throw new KeyNotFoundException($"No ticket '{ticketId}' in {Name}.");
+        }
+
+        var next = new CanonicalTicket
+        {
+            Id = existing.Id,
+            ProviderName = existing.ProviderName,
+            Title = existing.Title,
+            Description = existing.Description,
+            Status = existing.Status,
+            Priority = existing.Priority,
+            Assignee = existing.Assignee,
+            Reporter = existing.Reporter,
+            Labels = existing.Labels,
+            RelatedTo = existing.RelatedTo,
+            CreatedAt = existing.CreatedAt,
+            UpdatedAt = DateTimeOffset.UtcNow,
+            DueAt = dueAt,
+            Url = existing.Url
+        };
+
+        _tickets[ticketId] = next;
+        return Task.FromResult(next);
+    }
+
     public Task DeleteTicketAsync(string ticketId, CancellationToken ct = default)
     {
         _tickets.TryRemove(ticketId, out _);

@@ -249,7 +249,7 @@
         el.value = opts.options.includes(opts.value) ? opts.value : opts.options[0];
       } else {
         el = document.createElement(kind === 'textarea' ? 'textarea' : 'input');
-        if (kind === 'textarea') el.rows = 3; else el.type = 'text';
+        if (kind === 'textarea') el.rows = 3; else el.type = (kind === 'date' ? 'date' : 'text');
         el.value = opts.value || '';
         if (opts.readonly) el.disabled = true;
       }
@@ -278,6 +278,16 @@
           heading: '⚠️ Confirm status change', verb: 'Update status',
           fields: [tid, status],
           edits: () => ({ status: status.el.value })
+        };
+      }
+      if (evt.toolName === 'set_due_date') {
+        const tid = field('Ticket', 'text', { value: a.ticketId, readonly: true });
+        // Trim an ISO timestamp down to the date part for the date picker.
+        const due = field('Due date (blank = none)', 'date', { value: (a.dueAt || '').slice(0, 10) });
+        return {
+          heading: '⚠️ Confirm due date', verb: 'Set due date',
+          fields: [tid, due],
+          edits: () => ({ dueAt: due.value() || null })
         };
       }
       if (evt.toolName === 'assign_ticket') {

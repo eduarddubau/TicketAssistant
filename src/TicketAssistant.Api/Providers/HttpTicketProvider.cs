@@ -83,6 +83,15 @@ public sealed class HttpTicketProvider(HttpClient http) : ITicketProvider
         return Map(dto);
     }
 
+    public async Task<CanonicalTicket> SetDueDateAsync(string ticketId, DateTimeOffset? dueAt, CancellationToken ct = default)
+    {
+        var response = await http.PatchAsJsonAsync($"/api/tickets/{ticketId}/due", new { dueAt }, Json, ct);
+        response.EnsureSuccessStatusCode();
+        var dto = await response.Content.ReadFromJsonAsync<TicketDto>(Json, ct)
+                  ?? throw new InvalidOperationException("Empty response setting due date.");
+        return Map(dto);
+    }
+
     public async Task<TicketComment> AddCommentAsync(string ticketId, string body, CancellationToken ct = default)
     {
         var response = await http.PostAsJsonAsync(
@@ -122,6 +131,7 @@ public sealed class HttpTicketProvider(HttpClient http) : ITicketProvider
         RelatedTo = d.RelatedTo ?? [],
         CreatedAt = d.CreatedAt,
         UpdatedAt = d.UpdatedAt,
+        DueAt = d.DueAt,
         Url = new Uri(d.Url)
     };
 
@@ -130,7 +140,7 @@ public sealed class HttpTicketProvider(HttpClient http) : ITicketProvider
     private sealed record TicketDto(
         string Id, string Title, string? Description, string Status, string Priority,
         string? Assignee, string? Reporter, List<string>? Labels, List<string>? RelatedTo,
-        DateTimeOffset CreatedAt, DateTimeOffset? UpdatedAt, string Url);
+        DateTimeOffset CreatedAt, DateTimeOffset? UpdatedAt, DateTimeOffset? DueAt, string Url);
 
     private sealed record CommentDto(string Author, string Body, DateTimeOffset CreatedAt);
 }

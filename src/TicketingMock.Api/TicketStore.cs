@@ -113,6 +113,21 @@ public sealed class TicketStore
         return ticket;
     }
 
+    /// <summary>Sets (or clears) the ticket's deadline.</summary>
+    public MockTicket? UpdateDue(string id, DateTimeOffset? dueAt, string? owner)
+    {
+        if (Get(id, owner) is not { } ticket)
+        {
+            return null;
+        }
+
+        ticket.DueAt = dueAt;
+        ticket.UpdatedAt = DateTimeOffset.UtcNow;
+        ticket.History.Add(new MockEvent(
+            dueAt is null ? "due date cleared" : $"due date set to {dueAt:yyyy-MM-dd}", ticket.UpdatedAt.Value));
+        return ticket;
+    }
+
     public MockComment? AddComment(string id, string author, string body, string? owner)
     {
         if (Get(id, owner) is not { } ticket)

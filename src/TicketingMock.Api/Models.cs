@@ -27,6 +27,9 @@ public sealed class MockTicket
 
     /// <summary>What has happened to this ticket, oldest first — created, status changes, etc.</summary>
     public List<MockEvent> History { get; set; } = [];
+
+    /// <summary>Optional deadline. A ticket past this date and not yet resolved/closed is overdue.</summary>
+    public DateTimeOffset? DueAt { get; set; }
     public string Url { get; set; } = "";
 }
 
@@ -41,4 +44,5 @@ public sealed record CreateTicketBody(
     List<string>? RelatedTo = null);
 public sealed record UpdateStatusBody(string Status);
 public sealed record UpdateAssigneeBody(string? Assignee);
+public sealed record UpdateDueBody(DateTimeOffset? DueAt);
 public sealed record AddCommentBody(string? Author, string Body);
