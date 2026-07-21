@@ -52,7 +52,8 @@ public sealed class HttpTicketProvider(HttpClient http) : ITicketProvider
             description = request.Description,
             priority = request.Priority.ToString(),
             assignee = request.Assignee,
-            labels = request.Labels
+            labels = request.Labels,
+            relatedTo = request.RelatedTo
         };
 
         var response = await http.PostAsJsonAsync("/api/tickets", body, Json, ct);
@@ -118,6 +119,7 @@ public sealed class HttpTicketProvider(HttpClient http) : ITicketProvider
         Assignee = d.Assignee,
         Reporter = d.Reporter,
         Labels = d.Labels ?? [],
+        RelatedTo = d.RelatedTo ?? [],
         CreatedAt = d.CreatedAt,
         UpdatedAt = d.UpdatedAt,
         Url = new Uri(d.Url)
@@ -127,7 +129,7 @@ public sealed class HttpTicketProvider(HttpClient http) : ITicketProvider
     // into them; Map() then translates a DTO into the app's CanonicalTicket/TicketComment.
     private sealed record TicketDto(
         string Id, string Title, string? Description, string Status, string Priority,
-        string? Assignee, string? Reporter, List<string>? Labels,
+        string? Assignee, string? Reporter, List<string>? Labels, List<string>? RelatedTo,
         DateTimeOffset CreatedAt, DateTimeOffset? UpdatedAt, string Url);
 
     private sealed record CommentDto(string Author, string Body, DateTimeOffset CreatedAt);

@@ -11,6 +11,9 @@ public sealed class CanonicalTicket
     public string? Assignee { get; init; }
     public string? Reporter { get; init; }
     public IReadOnlyList<string> Labels { get; init; } = [];
+
+    /// <summary>Ids of tickets covering a similar issue (set when a near-duplicate was created anyway).</summary>
+    public IReadOnlyList<string> RelatedTo { get; init; } = [];
     public required DateTimeOffset CreatedAt { get; init; }
     public DateTimeOffset? UpdatedAt { get; init; }
     public required Uri Url { get; init; }

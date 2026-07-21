@@ -81,6 +81,7 @@
         </div>
         ${t.description ? `<p class="desc">${esc(t.description)}</p>` : ''}
         ${labels ? `<div class="labels">${labels}</div>` : ''}
+        ${(t.relatedTo || []).length ? `<div class="meta">🔗 related to ${esc((t.relatedTo || []).join(', '))}</div>` : ''}
         <div class="meta">
           <span>🧑‍💻 owner: ${esc(t.owner || '—')}</span>
           <span>👤 ${esc(t.assignee || 'unassigned')}</span>

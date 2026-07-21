@@ -17,6 +17,9 @@ public sealed class MockTicket
 
     /// <summary>Identifier of the user who created the ticket; reads are scoped to this.</summary>
     public string? Owner { get; set; }
+
+    /// <summary>Ids of tickets covering a similar issue, recorded when a near-duplicate is created anyway.</summary>
+    public List<string> RelatedTo { get; set; } = [];
     public List<string> Labels { get; set; } = [];
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? UpdatedAt { get; set; }
@@ -27,7 +30,9 @@ public sealed class MockTicket
 public sealed record MockComment(string Author, string Body, DateTimeOffset CreatedAt);
 
 // Request bodies accepted by the API.
-public sealed record CreateTicketBody(string Title, string? Description, string? Priority, string? Assignee, List<string>? Labels);
+public sealed record CreateTicketBody(
+    string Title, string? Description, string? Priority, string? Assignee, List<string>? Labels,
+    List<string>? RelatedTo = null);
 public sealed record UpdateStatusBody(string Status);
 public sealed record UpdateAssigneeBody(string? Assignee);
 public sealed record AddCommentBody(string? Author, string Body);

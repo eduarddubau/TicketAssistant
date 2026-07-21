@@ -74,6 +74,7 @@ public sealed class TicketStore
             Reporter = "ticket-assistant",
             Owner = owner,
             Labels = body.Labels ?? [],
+            RelatedTo = body.RelatedTo ?? [],
             CreatedAt = DateTimeOffset.UtcNow,
             Url = $"{_publicBaseUrl}/#{id}"
         };

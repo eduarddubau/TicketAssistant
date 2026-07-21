@@ -209,7 +209,19 @@ public sealed class OrchestrationLoop(
 
                         // Dedup: if the user already has a ticket for the same issue, don't create a
                         // duplicate — hand the matches back so the model offers to reopen/update instead.
-                        if (!ArgBool(arguments, "createAnyway"))
+                        if (ArgBool(arguments, "createAnyway"))
+                        {
+                            // They've chosen a separate ticket anyway — still record which existing
+                            // tickets it resembles so the two stay linked instead of drifting apart.
+                            var related = await FindSimilarTicketsAsync(ArgString(arguments, "title"), ct);
+                            if (related.Count > 0)
+                            {
+                                arguments["relatedTo"] = related.Select(t => t.Id).ToArray();
+                                logger.LogInformation(
+                                    "Linking new ticket to existing {Related}", string.Join(", ", related.Select(t => t.Id)));
+                            }
+                        }
+                        else
                         {
                             var duplicates = await FindSimilarTicketsAsync(ArgString(arguments, "title"), ct);
                             if (duplicates.Count > 0)

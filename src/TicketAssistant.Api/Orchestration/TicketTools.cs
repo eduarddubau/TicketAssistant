@@ -89,9 +89,11 @@ public static class TicketTools
             AIFunctionFactory.Create(
                 // createAnyway is read by OrchestrationLoop (not used here): the loop blocks a
                 // create when a similar ticket already exists for the user unless it is set true.
+                // relatedTo is filled in by OrchestrationLoop when a near-duplicate is created
+                // anyway, so the two tickets stay linked rather than drifting apart silently.
                 (string title, string? description, TicketPriority priority,
                  string? assignee = null, string[]? labels = null, bool createAnyway = false,
-                 CancellationToken ct = default) =>
+                 string[]? relatedTo = null, CancellationToken ct = default) =>
                     provider.CreateTicketAsync(
                         new CreateTicketRequest
                         {
@@ -99,7 +101,8 @@ public static class TicketTools
                             Description = description,
                             Priority = priority,
                             Assignee = assignee,
-                            Labels = labels ?? []
+                            Labels = labels ?? [],
+                            RelatedTo = relatedTo ?? []
                         },
                         ct),
                 name: CreateTicketToolName,
