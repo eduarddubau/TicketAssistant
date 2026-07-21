@@ -109,10 +109,14 @@ if (app.Environment.IsDevelopment())
     app.MapScalarApiReference(); // http://localhost:<port>/scalar/v1
 }
 
-// Start a new chat. Returns its id plus the assistant's greeting, so the client can show a
-// friendly introduction before the user types anything.
+// Where a browser can reach the ticket board. Distinct from Tickets:Http:BaseUrl, which is
+// how *this service* reaches the backend (a container hostname that means nothing to a browser).
+var boardUrl = builder.Configuration["Tickets:BoardUrl"] ?? "http://localhost:5090";
+
+// Start a new chat. Returns its id, the assistant's greeting, and the board URL so the client
+// can turn ticket ids in replies into links.
 app.MapPost("/api/conversations", (ConversationStore store) =>
-    Results.Ok(new { conversationId = store.Create(), greeting = ConversationStore.Greeting }));
+    Results.Ok(new { conversationId = store.Create(), greeting = ConversationStore.Greeting, boardUrl }));
 
 // Send a user message. Appends it to the conversation, runs the loop, and streams the
 // resulting events (assistant text / tools ran / a confirmation request) back as SSE.

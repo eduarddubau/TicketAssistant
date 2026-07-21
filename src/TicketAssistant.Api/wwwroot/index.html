@@ -26,8 +26,15 @@
     .msg { max-width: 70ch; padding: .55rem .8rem; border-radius: 10px; white-space: pre-wrap; word-wrap: break-word; }
     .user { align-self: flex-end; background: #2563eb; color: #fff; }
     .assistant { align-self: flex-start; background: color-mix(in srgb, CanvasText 8%, Canvas); }
+    .assistant a { color: #2563eb; font-weight: 600; }
     .tool { align-self: center; font-size: 12px; opacity: .7; font-family: ui-monospace, monospace; }
     .err { align-self: center; color: #dc2626; font-size: 13px; }
+    .thinking { align-self: flex-start; font-size: 13px; opacity: .7; display: flex; align-items: center; gap: .5rem; }
+    .thinking .spinner {
+      width: 12px; height: 12px; border-radius: 50%; border: 2px solid currentColor;
+      border-right-color: transparent; animation: spin .8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
     .card {
       align-self: flex-start; max-width: 60ch; border: 1px solid #f59e0b;
       border-radius: 10px; padding: .8rem; background: color-mix(in srgb, #f59e0b 10%, Canvas);
@@ -76,6 +83,7 @@
     const cidLabel = document.getElementById('cid');
     const userInput = document.getElementById('user');
     let conversationId = null;
+    let TICKET_BOARD = 'http://localhost:5090';   // replaced by the server's value on connect
 
     // Identifies the current user; the API scopes tickets to whoever this is. Persisted so
     // a reload keeps the same identity; editable so you can switch users to test isolation.
@@ -91,9 +99,35 @@
       const el = document.createElement('div');
       el.className = 'msg ' + cls;
       el.textContent = text;
+      if (cls === 'assistant') linkifyTickets(el);
       log.appendChild(el);
       log.scrollTop = log.scrollHeight;
       return el;
+    }
+
+    // Turns ticket ids like PROJ-1001 into links to that ticket on the board. Works on the
+    // element's text nodes only (never on markup), so model output can't inject HTML.
+    const TICKET_ID = /\b([A-Z]{2,}-\d+)\b/g;
+
+    function linkifyTickets(el) {
+      for (const node of [...el.childNodes]) {
+        if (node.nodeType !== Node.TEXT_NODE || !TICKET_ID.test(node.textContent)) continue;
+        TICKET_ID.lastIndex = 0;
+        const frag = document.createDocumentFragment();
+        let last = 0, m;
+        while ((m = TICKET_ID.exec(node.textContent)) !== null) {
+          frag.append(node.textContent.slice(last, m.index));
+          const a = document.createElement('a');
+          a.href = TICKET_BOARD + '/#' + m[1];
+          a.target = '_blank';
+          a.rel = 'noopener';
+          a.textContent = m[1];
+          frag.append(a);
+          last = m.index + m[1].length;
+        }
+        frag.append(node.textContent.slice(last));
+        node.replaceWith(frag);
+      }
     }
 
     async function newConversation() {
@@ -104,6 +138,7 @@
       log.innerHTML = '';
       add('tool', 'conversation ' + conversationId + ' · user: ' + userId);
       // The server supplies the opening message, so every frontend greets identically.
+      if (data.boardUrl) TICKET_BOARD = data.boardUrl;
       if (data.greeting) add('assistant', data.greeting);
     }
 
@@ -123,9 +158,12 @@
         for (const chunk of chunks) {
           const line = chunk.split('\n').find(l => l.startsWith('data:'));
           if (!line) continue;
+          stopThinking();   // something arrived — the wait is over
           handleEvent(JSON.parse(line.slice(5).trim()));
         }
       }
+      // Stream finished; linkify a message still open at the end.
+      if (streamingBubble) { linkifyTickets(streamingBubble); streamingBubble = null; }
     }
 
     // The bubble currently being streamed into, so consecutive deltas append to one message.
@@ -139,8 +177,8 @@
         return;
       }
 
-      // Anything else ends the message that was streaming.
-      streamingBubble = null;
+      // Anything else ends the message that was streaming — linkify it now it's complete.
+      if (streamingBubble) { linkifyTickets(streamingBubble); streamingBubble = null; }
 
       if (evt.type === 'assistant_text') add('assistant', evt.text);
       else if (evt.type === 'tool_executed') add('tool', '🔧 ' + evt.toolName + (evt.succeeded ? ' ✓' : ' ✗'));
@@ -261,6 +299,7 @@
           : { callId: evt.callId, approved: false };
         add('tool', (approved ? 'approved ' : 'declined ') + evt.toolName);
         lock(true);
+        startThinking();
         try {
           const res = await api('/api/conversations/' + conversationId + '/confirm', {
             method: 'POST',
@@ -269,6 +308,7 @@
           });
           await consume(res);
         } catch (e) { add('err', String(e)); }
+        stopThinking();
         lock(false);
       };
       approveBtn.onclick = () => decide(true);
@@ -279,6 +319,29 @@
 
     function lock(busy) { send.disabled = busy; input.disabled = busy; if (!busy) input.focus(); }
 
+    // A local model can take 10-25s to reply. Show a spinner with a running clock so the wait
+    // reads as "working" rather than "broken"; it clears as soon as anything comes back.
+    let thinkingEl = null, thinkingTimer = null;
+
+    function startThinking() {
+      stopThinking();
+      const started = Date.now();
+      thinkingEl = document.createElement('div');
+      thinkingEl.className = 'thinking';
+      thinkingEl.innerHTML = '<span class="spinner"></span><span class="elapsed">thinking… 0.0s</span>';
+      log.appendChild(thinkingEl);
+      log.scrollTop = log.scrollHeight;
+      thinkingTimer = setInterval(() => {
+        const secs = ((Date.now() - started) / 1000).toFixed(1);
+        thinkingEl.querySelector('.elapsed').textContent = `thinking… ${secs}s`;
+      }, 100);
+    }
+
+    function stopThinking() {
+      if (thinkingTimer) { clearInterval(thinkingTimer); thinkingTimer = null; }
+      if (thinkingEl) { thinkingEl.remove(); thinkingEl = null; }
+    }
+
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       const text = input.value.trim();
@@ -287,6 +350,7 @@
       add('user', text);
       input.value = '';
       lock(true);
+      startThinking();
       try {
         const res = await api('/api/conversations/' + conversationId + '/messages', {
           method: 'POST',
