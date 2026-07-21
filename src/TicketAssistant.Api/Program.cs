@@ -1,5 +1,4 @@
 using System.Text.Json;
-using Anthropic;
 using Microsoft.Extensions.AI;
 using OllamaSharp;
 using Scalar.AspNetCore;
@@ -14,30 +13,30 @@ builder.Services.AddCors(options => options.AddPolicy(AngularDevCorsPolicy, poli
 
 builder.Services.AddOpenApi();
 
-// One provider today; register a sibling ITicketProvider (Zendesk, ...) and resolve by
-// name once there's more than one to choose between.
-builder.Services.AddSingleton<ITicketProvider, JiraTicketProvider>();
+// Tickets:Backend switches the ITicketProvider implementation. "Http" (default) calls an
+// external ticketing system over REST (the TicketingMock.Api service in this repo);
+// "InMemory" uses the in-process InMemoryTicketProvider stub for offline runs.
+var ticketsBackend = builder.Configuration["Tickets:Backend"] ?? "Http";
+if (ticketsBackend.Equals("InMemory", StringComparison.OrdinalIgnoreCase))
+{
+    builder.Services.AddSingleton<ITicketProvider, InMemoryTicketProvider>();
+}
+else
+{
+    var ticketsBaseUrl = builder.Configuration["Tickets:Http:BaseUrl"] ?? "http://localhost:5090";
+    builder.Services.AddHttpClient<ITicketProvider, HttpTicketProvider>(
+        c => c.BaseAddress = new Uri(ticketsBaseUrl));
+}
 
-// Deliberately not .UseFunctionInvocation() anywhere below — OrchestrationLoop drives
-// the tool-call loop by hand so it can intercept create_ticket before it runs.
+// A local Ollama model provides chat + tool calling. Deliberately not
+// .UseFunctionInvocation() — OrchestrationLoop drives the tool-call loop by hand so it
+// can intercept create_ticket before it runs.
 builder.Services.AddSingleton<IChatClient>(sp =>
 {
     var configuration = sp.GetRequiredService<IConfiguration>();
-    var provider = configuration["Llm:Provider"] ?? "Ollama";
-
-    if (provider.Equals("Anthropic", StringComparison.OrdinalIgnoreCase))
-    {
-        // AnthropicClient() reads the ANTHROPIC_API_KEY environment variable itself
-        // (docker-compose passes it through when Llm__Provider=Anthropic).
-        var anthropic = new AnthropicClient();
-        var model = configuration["Anthropic:Model"] ?? "claude-sonnet-5";
-        return anthropic.AsIChatClient(model);
-    }
-
-    // Ollama is the default provider — no API key or account needed to run this app.
     var baseUrl = configuration["Ollama:BaseUrl"] ?? "http://localhost:11434";
-    var ollamaModel = configuration["Ollama:Model"] ?? "llama3.2:3b";
-    return new OllamaApiClient(new Uri(baseUrl), ollamaModel);
+    var model = configuration["Ollama:Model"] ?? "llama3.2:3b";
+    return new OllamaApiClient(new Uri(baseUrl), model);
 });
 
 builder.Services.AddSingleton(sp => TicketTools.Build(sp.GetRequiredService<ITicketProvider>()));

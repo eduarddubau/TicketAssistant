@@ -6,14 +6,14 @@ services:
       - "5080:8080"
     environment:
       ASPNETCORE_ENVIRONMENT: Development
-      # User secrets on the host aren't visible inside the container, so the Anthropic
-      # key has to come in as a real env var here when Llm__Provider=Anthropic.
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      Llm__Provider: ${LLM_PROVIDER:-Ollama}
       Ollama__BaseUrl: http://ollama:11434
       Ollama__Model: ${OLLAMA_MODEL:-llama3.2:3b}
+      # Where the assistant sends ticket operations (the ticketing-mock service below).
+      Tickets__Backend: Http
+      Tickets__Http__BaseUrl: http://ticketing-mock:8080
     depends_on:
       - ollama
+      - ticketing-mock
 
   ollama:
     image: ollama/ollama:latest
@@ -21,6 +21,17 @@ services:
       - "11434:11434"
     volumes:
       - ollama-data:/root/.ollama
+
+  # Stands in for a real external ticketing system (Jira/Zendesk/...) so created tickets
+  # can be seen landing in a separate app. Board UI at http://localhost:5090/
+  ticketing-mock:
+    build:
+      context: ./src/TicketingMock.Api
+    ports:
+      - "5090:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      PublicBaseUrl: http://localhost:5090
 
 volumes:
   ollama-data:

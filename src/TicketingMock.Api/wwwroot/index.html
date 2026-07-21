@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Ticketing Mock — board</title>
+  <style>
+    :root { color-scheme: light dark; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font: 15px/1.5 system-ui, sans-serif; background: Canvas; color: CanvasText; }
+    header {
+      position: sticky; top: 0; background: Canvas; z-index: 1;
+      padding: 1rem 1.25rem; border-bottom: 1px solid color-mix(in srgb, CanvasText 15%, transparent);
+      display: flex; align-items: baseline; gap: .75rem; flex-wrap: wrap;
+    }
+    header h1 { font-size: 1.1rem; margin: 0; }
+    header .count { opacity: .6; font-size: .85rem; }
+    header .live { margin-left: auto; font-size: .75rem; opacity: .6; display: flex; align-items: center; gap: .4rem; }
+    header .dot { width: 8px; height: 8px; border-radius: 50%; background: #16a34a; animation: pulse 2s infinite; }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .3; } }
+    main { padding: 1.25rem; display: grid; gap: 1rem; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); max-width: 1400px; margin: 0 auto; }
+    .card {
+      border: 1px solid color-mix(in srgb, CanvasText 15%, transparent); border-radius: 12px;
+      padding: 1rem; background: color-mix(in srgb, CanvasText 3%, Canvas); display: flex; flex-direction: column; gap: .5rem;
+    }
+    .card.fresh { animation: flash 1.5s ease-out; }
+    @keyframes flash { from { background: color-mix(in srgb, #2563eb 25%, Canvas); } to { background: color-mix(in srgb, CanvasText 3%, Canvas); } }
+    .card .top { display: flex; align-items: center; gap: .5rem; }
+    .card .id { font: 12px/1 ui-monospace, monospace; opacity: .6; }
+    .card h2 { font-size: 1rem; margin: 0; flex: 1; }
+    .badges { display: flex; gap: .4rem; flex-wrap: wrap; }
+    .badge { font-size: 11px; font-weight: 600; padding: .15rem .5rem; border-radius: 999px; text-transform: uppercase; letter-spacing: .03em; }
+    .st-Open { background: #3b82f620; color: #3b82f6; }
+    .st-InProgress { background: #f59e0b20; color: #f59e0b; }
+    .st-Blocked { background: #dc262620; color: #dc2626; }
+    .st-Resolved { background: #16a34a20; color: #16a34a; }
+    .st-Closed { background: color-mix(in srgb, CanvasText 15%, transparent); color: CanvasText; }
+    .pr { border: 1px solid currentColor; }
+    .pr-Low { color: #6b7280; } .pr-Medium { color: #3b82f6; } .pr-High { color: #f59e0b; } .pr-Urgent { color: #dc2626; }
+    .desc { font-size: .9rem; opacity: .8; margin: 0; }
+    .labels { display: flex; gap: .35rem; flex-wrap: wrap; }
+    .label { font-size: 11px; padding: .1rem .45rem; border-radius: 5px; background: color-mix(in srgb, CanvasText 10%, transparent); }
+    .meta { font-size: 12px; opacity: .6; display: flex; gap: .75rem; flex-wrap: wrap; margin-top: .25rem; }
+    .empty { grid-column: 1/-1; text-align: center; opacity: .5; padding: 3rem; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>🎫 Ticketing Mock</h1>
+    <span class="count" id="count"></span>
+    <span class="live"><span class="dot"></span> live · refreshes every 3s</span>
+  </header>
+  <main id="board"></main>
+
+  <script>
+    const board = document.getElementById('board');
+    const countEl = document.getElementById('count');
+    let seen = new Set();
+    let first = true;
+
+    const esc = (s) => (s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+    function timeAgo(iso) {
+      const s = Math.floor((Date.now() - new Date(iso)) / 1000);
+      if (s < 60) return s + 's ago';
+      if (s < 3600) return Math.floor(s / 60) + 'm ago';
+      if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+      return Math.floor(s / 86400) + 'd ago';
+    }
+
+    function card(t) {
+      const isFresh = !first && !seen.has(t.id);
+      const labels = (t.labels || []).map(l => `<span class="label">${esc(l)}</span>`).join('');
+      const comments = (t.comments || []).length;
+      return `<article class="card ${isFresh ? 'fresh' : ''}">
+        <div class="top"><span class="id">${esc(t.id)}</span></div>
+        <h2>${esc(t.title)}</h2>
+        <div class="badges">
+          <span class="badge st-${esc(t.status)}">${esc(t.status)}</span>
+          <span class="badge pr pr-${esc(t.priority)}">${esc(t.priority)}</span>
+        </div>
+        ${t.description ? `<p class="desc">${esc(t.description)}</p>` : ''}
+        ${labels ? `<div class="labels">${labels}</div>` : ''}
+        <div class="meta">
+          <span>👤 ${esc(t.assignee || 'unassigned')}</span>
+          <span>💬 ${comments}</span>
+          <span>🕓 ${timeAgo(t.createdAt)}</span>
+        </div>
+      </article>`;
+    }
+
+    async function refresh() {
+      try {
+        const res = await fetch('/api/tickets');
+        const tickets = await res.json();
+        board.innerHTML = tickets.length
+          ? tickets.map(card).join('')
+          : '<div class="empty">No tickets yet — create one from the assistant.</div>';
+        countEl.textContent = tickets.length + ' ticket' + (tickets.length === 1 ? '' : 's');
+        seen = new Set(tickets.map(t => t.id));
+        first = false;
+      } catch (e) {
+        countEl.textContent = '⚠ cannot reach API';
+      }
+    }
+
+    refresh();
+    setInterval(refresh, 3000);
+  </script>
+</body>
+</html>

@@ -4,17 +4,16 @@ using TicketAssistant.Api.Models;
 namespace TicketAssistant.Api.Providers;
 
 /// <summary>
-/// Stand-in for a real Jira adapter: same shape an HTTP-backed implementation would
-/// have, but backed by memory so the orchestration loop is runnable without OAuth
-/// credentials. Swap the method bodies for Jira REST API calls when ready, and add a
-/// sibling ZendeskTicketProvider the same way — nothing else in the app changes.
+/// In-memory offline stub of ITicketProvider: keeps tickets in a dictionary so the
+/// orchestration loop is runnable with no external ticketing system. Selected by
+/// Tickets:Backend=InMemory; HttpTicketProvider is the real HTTP-backed implementation.
 /// </summary>
-public sealed class JiraTicketProvider : ITicketProvider
+public sealed class InMemoryTicketProvider : ITicketProvider
 {
     private readonly ConcurrentDictionary<string, CanonicalTicket> _tickets = new();
     private int _nextId = 1000;
 
-    public string Name => "jira";
+    public string Name => "in-memory";
 
     public Task<CanonicalTicket> GetTicketAsync(string ticketId, CancellationToken ct = default)
     {
@@ -50,7 +49,7 @@ public sealed class JiraTicketProvider : ITicketProvider
             Assignee = request.Assignee,
             Labels = request.Labels,
             CreatedAt = DateTimeOffset.UtcNow,
-            Url = new Uri($"https://example.atlassian.net/browse/{id}")
+            Url = new Uri($"https://tickets.example.com/browse/{id}")
         };
 
         _tickets[id] = ticket;
