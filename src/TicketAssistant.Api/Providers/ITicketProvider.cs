@@ -34,6 +34,9 @@ public interface ITicketProvider
     /// <summary>Change an existing ticket's status and return the updated ticket.</summary>
     Task<CanonicalTicket> UpdateTicketStatusAsync(string ticketId, TicketStatus status, CancellationToken ct = default);
 
+    /// <summary>Assign the ticket to someone (null/empty unassigns it) and return it.</summary>
+    Task<CanonicalTicket> AssignTicketAsync(string ticketId, string? assignee, CancellationToken ct = default);
+
     /// <summary>Append a comment to a ticket and return the stored comment.</summary>
     Task<TicketComment> AddCommentAsync(string ticketId, string body, CancellationToken ct = default);
 }

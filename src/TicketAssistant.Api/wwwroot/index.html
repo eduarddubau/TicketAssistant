@@ -179,6 +179,15 @@
           edits: () => ({ status: status.el.value })
         };
       }
+      if (evt.toolName === 'assign_ticket') {
+        const tid = field('Ticket', 'text', { value: a.ticketId, readonly: true });
+        const who = field('Assign to (blank = unassigned)', 'text', { value: a.assignee });
+        return {
+          heading: '⚠️ Confirm assignment', verb: 'Assign ticket',
+          fields: [tid, who],
+          edits: () => ({ assignee: who.value() })
+        };
+      }
       if (evt.toolName === 'resolve_ticket') {
         const tid = field('Ticket', 'text', { value: a.ticketId, readonly: true });
         const note = field('Resolution note', 'textarea', { value: a.note, required: true });

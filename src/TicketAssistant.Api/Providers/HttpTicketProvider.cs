@@ -72,6 +72,16 @@ public sealed class HttpTicketProvider(HttpClient http) : ITicketProvider
         return Map(dto);
     }
 
+    public async Task<CanonicalTicket> AssignTicketAsync(string ticketId, string? assignee, CancellationToken ct = default)
+    {
+        var response = await http.PatchAsJsonAsync(
+            $"/api/tickets/{ticketId}/assignee", new { assignee }, Json, ct);
+        response.EnsureSuccessStatusCode();
+        var dto = await response.Content.ReadFromJsonAsync<TicketDto>(Json, ct)
+                  ?? throw new InvalidOperationException("Empty response assigning ticket.");
+        return Map(dto);
+    }
+
     public async Task<TicketComment> AddCommentAsync(string ticketId, string body, CancellationToken ct = default)
     {
         var response = await http.PostAsJsonAsync(

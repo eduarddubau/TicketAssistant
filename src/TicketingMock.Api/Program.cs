@@ -30,6 +30,9 @@ app.MapPost("/api/tickets", (CreateTicketBody body, HttpRequest req, TicketStore
 app.MapPatch("/api/tickets/{id}/status", (string id, UpdateStatusBody body, HttpRequest req, TicketStore store) =>
     store.UpdateStatus(id, body.Status, Owner(req)) is { } ticket ? Results.Ok(ticket) : Results.NotFound());
 
+app.MapPatch("/api/tickets/{id}/assignee", (string id, UpdateAssigneeBody body, HttpRequest req, TicketStore store) =>
+    store.UpdateAssignee(id, body.Assignee, Owner(req)) is { } ticket ? Results.Ok(ticket) : Results.NotFound());
+
 app.MapPost("/api/tickets/{id}/comments", (string id, AddCommentBody body, HttpRequest req, TicketStore store) =>
     store.AddComment(id, string.IsNullOrWhiteSpace(body.Author) ? "anonymous" : body.Author, body.Body, Owner(req)) is { } comment
         ? Results.Ok(comment)

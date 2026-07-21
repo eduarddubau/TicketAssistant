@@ -94,6 +94,19 @@ public sealed class TicketStore
         return ticket;
     }
 
+    /// <summary>Sets (or clears, when null/empty) who the ticket is assigned to.</summary>
+    public MockTicket? UpdateAssignee(string id, string? assignee, string? owner)
+    {
+        if (Get(id, owner) is not { } ticket)
+        {
+            return null;
+        }
+
+        ticket.Assignee = string.IsNullOrWhiteSpace(assignee) ? null : assignee;
+        ticket.UpdatedAt = DateTimeOffset.UtcNow;
+        return ticket;
+    }
+
     public MockComment? AddComment(string id, string author, string body, string? owner)
     {
         if (Get(id, owner) is not { } ticket)

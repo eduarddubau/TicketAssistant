@@ -29,4 +29,5 @@ public sealed record MockComment(string Author, string Body, DateTimeOffset Crea
 // Request bodies accepted by the API.
 public sealed record CreateTicketBody(string Title, string? Description, string? Priority, string? Assignee, List<string>? Labels);
 public sealed record UpdateStatusBody(string Status);
+public sealed record UpdateAssigneeBody(string? Assignee);
 public sealed record AddCommentBody(string? Author, string Body);

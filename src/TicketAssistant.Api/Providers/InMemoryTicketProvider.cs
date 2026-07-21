@@ -95,6 +95,33 @@ public sealed class InMemoryTicketProvider : ITicketProvider
         return Task.FromResult(next);
     }
 
+    public Task<CanonicalTicket> AssignTicketAsync(string ticketId, string? assignee, CancellationToken ct = default)
+    {
+        if (!_tickets.TryGetValue(ticketId, out var existing))
+        {
+            throw new KeyNotFoundException($"No ticket '{ticketId}' in {Name}.");
+        }
+
+        var next = new CanonicalTicket
+        {
+            Id = existing.Id,
+            ProviderName = existing.ProviderName,
+            Title = existing.Title,
+            Description = existing.Description,
+            Status = existing.Status,
+            Priority = existing.Priority,
+            Assignee = string.IsNullOrWhiteSpace(assignee) ? null : assignee,
+            Reporter = existing.Reporter,
+            Labels = existing.Labels,
+            CreatedAt = existing.CreatedAt,
+            UpdatedAt = DateTimeOffset.UtcNow,
+            Url = existing.Url
+        };
+
+        _tickets[ticketId] = next;
+        return Task.FromResult(next);
+    }
+
     public Task<TicketComment> AddCommentAsync(string ticketId, string body, CancellationToken ct = default)
     {
         if (!_tickets.ContainsKey(ticketId))

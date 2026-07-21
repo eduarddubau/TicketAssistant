@@ -23,12 +23,14 @@ public static class TicketTools
     public const string UpdateStatusToolName = "update_ticket_status";
     public const string AddCommentToolName = "add_comment";
     public const string ResolveTicketToolName = "resolve_ticket";
+    public const string AssignTicketToolName = "assign_ticket";
 
     // The tools that change a ticket and therefore need explicit user approval.
     private static readonly HashSet<string> ConfirmationRequiredTools =
         new(StringComparer.Ordinal)
         {
-            CreateTicketToolName, UpdateStatusToolName, AddCommentToolName, ResolveTicketToolName
+            CreateTicketToolName, UpdateStatusToolName, AddCommentToolName,
+            ResolveTicketToolName, AssignTicketToolName
         };
 
     /// <summary>Whether a tool mutates a ticket and so needs the user to confirm it first.</summary>
@@ -95,6 +97,14 @@ public static class TicketTools
                 name: UpdateStatusToolName,
                 description: "Change an existing ticket's status. Never executed automatically — the " +
                               "caller shows the user a confirmation card and gets explicit approval first."),
+
+            AIFunctionFactory.Create(
+                (string ticketId, string? assignee, CancellationToken ct) =>
+                    provider.AssignTicketAsync(ticketId, assignee, ct),
+                name: AssignTicketToolName,
+                description: "Assign a ticket to someone, or reassign it. Pass an empty assignee to " +
+                              "leave it unassigned. Never executed automatically — the caller shows the " +
+                              "user a confirmation card and gets explicit approval first."),
 
             AIFunctionFactory.Create(
                 // Closing a ticket almost always comes with a "why", so this does both in one
