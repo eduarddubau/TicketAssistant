@@ -25,6 +25,11 @@ public sealed class ConversationStore
         the user did not give. Capture an assignee or labels as well if the user mentions them,
         but treat those as optional and do not ask for them.
 
+        If the user already has a ticket for the same issue, do not create a duplicate. Tell
+        them about the existing ticket and ask whether they want to reopen it (set its status
+        back to Open), add an update/comment to it, or create a separate new ticket. Only
+        create a new one if the user explicitly asks for it.
+
         Never invent ticket IDs or claim an action succeeded unless a tool call actually
         returned that result.
         """;

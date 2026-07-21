@@ -38,8 +38,11 @@ public static class TicketTools
                 description: "Search tickets by title/description text."),
 
             AIFunctionFactory.Create(
+                // createAnyway is read by OrchestrationLoop (not used here): the loop blocks a
+                // create when a similar ticket already exists for the user unless it is set true.
                 (string title, string? description, TicketPriority priority,
-                 string? assignee = null, string[]? labels = null, CancellationToken ct = default) =>
+                 string? assignee = null, string[]? labels = null, bool createAnyway = false,
+                 CancellationToken ct = default) =>
                     provider.CreateTicketAsync(
                         new CreateTicketRequest
                         {
@@ -53,8 +56,11 @@ public static class TicketTools
                 name: CreateTicketToolName,
                 description: "Create a new ticket. Only call this once you have a title, a description, " +
                               "and a priority — if any is missing, ask the user for it rather than guessing. " +
-                              "assignee and labels are optional. Never executed automatically — the caller " +
-                              "shows the user a confirmation card and gets explicit approval first."),
+                              "assignee and labels are optional. If a ticket for the same issue already " +
+                              "exists for this user, you'll be told and asked to check with them first; set " +
+                              "createAnyway=true only after the user explicitly chooses to create a separate " +
+                              "new ticket. Never executed automatically — the caller shows the user a " +
+                              "confirmation card and gets explicit approval first."),
 
             AIFunctionFactory.Create(
                 (string ticketId, TicketStatus status, CancellationToken ct) =>

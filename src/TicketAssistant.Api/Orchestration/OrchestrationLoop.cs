@@ -1,6 +1,8 @@
 using System.Runtime.CompilerServices;
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.AI;
 using TicketAssistant.Api.Models;
+using TicketAssistant.Api.Providers;
 
 namespace TicketAssistant.Api.Orchestration;
 
@@ -13,7 +15,7 @@ namespace TicketAssistant.Api.Orchestration;
 /// ConfirmationRequired event so the caller can show the user a confirmation card
 /// first.
 /// </summary>
-public sealed class OrchestrationLoop(IChatClient chatClient, IReadOnlyList<AIFunction> tools)
+public sealed class OrchestrationLoop(IChatClient chatClient, IReadOnlyList<AIFunction> tools, ITicketProvider provider)
 {
     private readonly Dictionary<string, AIFunction> _toolsByName = tools.ToDictionary(t => t.Name);
 
@@ -114,8 +116,7 @@ public sealed class OrchestrationLoop(IChatClient chatClient, IReadOnlyList<AIFu
                 {
                     var arguments = call.Arguments ?? new Dictionary<string, object?>();
 
-                    // create-specific guardrail: don't surface a confirmation card for a
-                    // half-empty ticket — hand the model the missing fields so it asks first.
+                    // create-specific guardrails, checked before surfacing a confirmation card.
                     if (call.Name == TicketTools.CreateTicketToolName)
                     {
                         var missing = MissingCreateTicketFields(arguments);
@@ -126,6 +127,25 @@ public sealed class OrchestrationLoop(IChatClient chatClient, IReadOnlyList<AIFu
                                 $"Ticket not created — required fields still missing: {string.Join("; ", missing)}. " +
                                 "Ask the user to provide them; do not call create_ticket again until they have.")]));
                             continue;
+                        }
+
+                        // Dedup: if the user already has a ticket for the same issue, don't create a
+                        // duplicate — hand the matches back so the model offers to reopen/update instead.
+                        if (!ArgBool(arguments, "createAnyway"))
+                        {
+                            var duplicates = await FindSimilarTicketsAsync(ArgString(arguments, "title"), ct);
+                            if (duplicates.Count > 0)
+                            {
+                                var list = string.Join("; ", duplicates.Select(t => $"{t.Id} \"{t.Title}\" (status {t.Status})"));
+                                messages.Add(new ChatMessage(ChatRole.Tool, [new FunctionResultContent(
+                                    call.CallId,
+                                    $"This user already has a ticket for what looks like the same issue: {list}. " +
+                                    "Do not create a duplicate. Tell the user about the existing ticket and ask whether " +
+                                    "they want to reopen it (set its status to Open), add an update/comment to it, or " +
+                                    "create a separate new ticket. Only if they choose a new one, call create_ticket " +
+                                    "again with createAnyway set to true.")]));
+                                continue;
+                            }
                         }
                     }
 
@@ -178,6 +198,78 @@ public sealed class OrchestrationLoop(IChatClient chatClient, IReadOnlyList<AIFu
 
     private static string? ArgString(IDictionary<string, object?> arguments, string key)
         => arguments.TryGetValue(key, out var value) ? value?.ToString() : null;
+
+    private static bool ArgBool(IDictionary<string, object?> arguments, string key)
+    {
+        if (!arguments.TryGetValue(key, out var value) || value is null)
+        {
+            return false;
+        }
+
+        return value is bool b ? b : bool.TryParse(value.ToString(), out var parsed) && parsed;
+    }
+
+    // Generic/short words that shouldn't count toward "same issue" similarity on their own.
+    private static readonly HashSet<string> StopWords = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "the", "and", "for", "with", "when", "after", "from", "that", "this", "page", "issue",
+        "ticket", "error", "problem", "request", "please", "some", "does", "cannot", "have"
+    };
+
+    private static HashSet<string> MeaningfulTokens(string? text)
+    {
+        var tokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return tokens;
+        }
+
+        foreach (var token in Regex.Split(text, "[^A-Za-z0-9]+"))
+        {
+            if (token.Length >= 4 && !StopWords.Contains(token))
+            {
+                tokens.Add(token.ToLowerInvariant());
+            }
+        }
+
+        return tokens;
+    }
+
+    /// <summary>
+    /// Returns the current user's tickets whose title strongly overlaps the proposed title —
+    /// a deliberately simple, deterministic "same issue" heuristic (keyword overlap) so dedup
+    /// works regardless of the model. The search is user-scoped by the provider.
+    /// </summary>
+    private async Task<IReadOnlyList<CanonicalTicket>> FindSimilarTicketsAsync(string? proposedTitle, CancellationToken ct)
+    {
+        var proposed = MeaningfulTokens(proposedTitle);
+        if (proposed.Count == 0)
+        {
+            return [];
+        }
+
+        IReadOnlyList<CanonicalTicket> existing;
+        try
+        {
+            existing = await provider.SearchTicketsAsync(string.Empty, ct); // all of this user's tickets
+        }
+        catch
+        {
+            return []; // never block a create just because the dedup lookup failed
+        }
+
+        return existing.Where(t =>
+        {
+            var other = MeaningfulTokens(t.Title);
+            if (other.Count == 0)
+            {
+                return false;
+            }
+
+            var shared = proposed.Count(other.Contains);
+            return shared >= 2 || (shared >= 1 && (double)shared / Math.Min(proposed.Count, other.Count) >= 0.5);
+        }).ToList();
+    }
 
     private static async Task<object?> InvokeToolAsync(AIFunction tool, FunctionCallContent call, CancellationToken ct)
     {
