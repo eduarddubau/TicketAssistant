@@ -29,18 +29,23 @@ public static class TicketTools
                 description: "Search tickets by title/description text."),
 
             AIFunctionFactory.Create(
-                (string title, string? description, TicketPriority priority, CancellationToken ct) =>
+                (string title, string? description, TicketPriority priority,
+                 string? assignee = null, string[]? labels = null, CancellationToken ct = default) =>
                     provider.CreateTicketAsync(
                         new CreateTicketRequest
                         {
                             Title = title,
                             Description = description,
-                            Priority = priority
+                            Priority = priority,
+                            Assignee = assignee,
+                            Labels = labels ?? []
                         },
                         ct),
                 name: CreateTicketToolName,
-                description: "Create a new ticket. Never executed automatically — the caller must show " +
-                              "the user a confirmation card and get explicit approval first."),
+                description: "Create a new ticket. Only call this once you have a title, a description, " +
+                              "and a priority — if any is missing, ask the user for it rather than guessing. " +
+                              "assignee and labels are optional. Never executed automatically — the caller " +
+                              "shows the user a confirmation card and gets explicit approval first."),
 
             AIFunctionFactory.Create(
                 (string ticketId, TicketStatus status, CancellationToken ct) =>

@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using Microsoft.Extensions.AI;
+using TicketAssistant.Api.Models;
 
 namespace TicketAssistant.Api.Orchestration;
 
@@ -58,8 +59,19 @@ public sealed class OrchestrationLoop(IChatClient chatClient, IReadOnlyList<AIFu
     {
         var options = new ChatOptions { Tools = [.. tools] };
 
-        while (true)
+        // Bounds runaway tool loops (e.g. a weak model repeatedly calling create_ticket
+        // with empty fields even after being told what's missing).
+        const int maxTurns = 8;
+
+        for (var turn = 0; ; turn++)
         {
+            if (turn >= maxTurns)
+            {
+                yield return new OrchestrationEvent.AssistantText(
+                    "I wasn't able to complete that. Could you rephrase or give me a bit more detail?");
+                yield break;
+            }
+
             var response = await chatClient.GetResponseAsync(messages, options, ct);
             messages.AddMessages(response);
 
@@ -78,8 +90,21 @@ public sealed class OrchestrationLoop(IChatClient chatClient, IReadOnlyList<AIFu
             {
                 if (call.Name == TicketTools.CreateTicketToolName)
                 {
-                    yield return new OrchestrationEvent.ConfirmationRequired(
-                        call.CallId, call.Name, call.Arguments ?? new Dictionary<string, object?>());
+                    var arguments = call.Arguments ?? new Dictionary<string, object?>();
+
+                    // Guardrail: don't surface a confirmation card for a half-empty ticket.
+                    // Hand the model the list of missing fields so it asks the user instead.
+                    var missing = MissingCreateTicketFields(arguments);
+                    if (missing.Count > 0)
+                    {
+                        messages.Add(new ChatMessage(ChatRole.Tool, [new FunctionResultContent(
+                            call.CallId,
+                            $"Ticket not created — required fields still missing: {string.Join("; ", missing)}. " +
+                            "Ask the user to provide them; do not call create_ticket again until they have.")]));
+                        continue;
+                    }
+
+                    yield return new OrchestrationEvent.ConfirmationRequired(call.CallId, call.Name, arguments);
                     yield break;
                 }
 
@@ -97,6 +122,36 @@ public sealed class OrchestrationLoop(IChatClient chatClient, IReadOnlyList<AIFu
             }
         }
     }
+
+    /// <summary>
+    /// Returns the human-readable names of required create_ticket fields the model left
+    /// empty or invalid. Empty list means the arguments are complete enough to create.
+    /// </summary>
+    private static List<string> MissingCreateTicketFields(IDictionary<string, object?> arguments)
+    {
+        var missing = new List<string>();
+
+        if (string.IsNullOrWhiteSpace(ArgString(arguments, "title")))
+        {
+            missing.Add("title");
+        }
+
+        if (string.IsNullOrWhiteSpace(ArgString(arguments, "description")))
+        {
+            missing.Add("description");
+        }
+
+        var priority = ArgString(arguments, "priority");
+        if (string.IsNullOrWhiteSpace(priority) || !Enum.TryParse<TicketPriority>(priority, ignoreCase: true, out _))
+        {
+            missing.Add("priority (Low, Medium, High, or Urgent)");
+        }
+
+        return missing;
+    }
+
+    private static string? ArgString(IDictionary<string, object?> arguments, string key)
+        => arguments.TryGetValue(key, out var value) ? value?.ToString() : null;
 
     private static async Task<object?> InvokeToolAsync(AIFunction tool, FunctionCallContent call, CancellationToken ct)
     {
