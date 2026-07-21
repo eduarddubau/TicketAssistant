@@ -6,8 +6,14 @@ services:
       - "5080:8080"
     environment:
       ASPNETCORE_ENVIRONMENT: Development
+      # LLM backend: Ollama (default, local) | Anthropic | OpenAI | Google. Only the
+      # selected provider's API key is needed; Ollama needs none.
+      Llm__Provider: ${LLM_PROVIDER:-Ollama}
       Ollama__BaseUrl: http://ollama:11434
       Ollama__Model: ${OLLAMA_MODEL:-llama3.2:3b}
+      Anthropic__ApiKey: ${ANTHROPIC_API_KEY:-}
+      OpenAI__ApiKey: ${OPENAI_API_KEY:-}
+      Google__ApiKey: ${GOOGLE_API_KEY:-}
       # Where the assistant sends ticket operations (the ticketing-mock service below).
       Tickets__Backend: Http
       Tickets__Http__BaseUrl: http://ticketing-mock:8080

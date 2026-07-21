@@ -1,6 +1,9 @@
+using System.ClientModel;
 using System.Text.Json;
+using Anthropic;
 using Microsoft.Extensions.AI;
 using OllamaSharp;
+using OpenAI;
 using Scalar.AspNetCore;
 using TicketAssistant.Api.Orchestration;
 using TicketAssistant.Api.Providers;
@@ -28,15 +31,48 @@ else
         c => c.BaseAddress = new Uri(ticketsBaseUrl));
 }
 
-// A local Ollama model provides chat + tool calling. Deliberately not
-// .UseFunctionInvocation() — OrchestrationLoop drives the tool-call loop by hand so it
-// can intercept create_ticket before it runs.
+// Llm:Provider selects the chat backend behind the single IChatClient abstraction:
+// "Ollama" (default, local, no key), "Anthropic", "OpenAI", or "Google". Google is reached
+// through its OpenAI-compatible endpoint, so it reuses the OpenAI client. Deliberately not
+// .UseFunctionInvocation() — OrchestrationLoop drives the tool-call loop by hand so it can
+// intercept create_ticket before it runs.
 builder.Services.AddSingleton<IChatClient>(sp =>
 {
-    var configuration = sp.GetRequiredService<IConfiguration>();
-    var baseUrl = configuration["Ollama:BaseUrl"] ?? "http://localhost:11434";
-    var model = configuration["Ollama:Model"] ?? "llama3.2:3b";
-    return new OllamaApiClient(new Uri(baseUrl), model);
+    var cfg = sp.GetRequiredService<IConfiguration>();
+    var provider = (cfg["Llm:Provider"] ?? "Ollama").ToLowerInvariant();
+
+    static string RequireKey(IConfiguration cfg, string key) =>
+        cfg[key] ?? throw new InvalidOperationException($"{key} is required for the selected Llm:Provider.");
+
+    switch (provider)
+    {
+        case "anthropic":
+        {
+            var apiKey = cfg["Anthropic:ApiKey"];
+            var client = string.IsNullOrEmpty(apiKey) ? new AnthropicClient() : new AnthropicClient { ApiKey = apiKey };
+            return client.AsIChatClient(cfg["Anthropic:Model"] ?? "claude-sonnet-5");
+        }
+        case "openai":
+        {
+            return new OpenAIClient(new ApiKeyCredential(RequireKey(cfg, "OpenAI:ApiKey")))
+                .GetChatClient(cfg["OpenAI:Model"] ?? "gpt-4o-mini")
+                .AsIChatClient();
+        }
+        case "google":
+        {
+            var endpoint = cfg["Google:BaseUrl"] ?? "https://generativelanguage.googleapis.com/v1beta/openai/";
+            return new OpenAIClient(
+                    new ApiKeyCredential(RequireKey(cfg, "Google:ApiKey")),
+                    new OpenAIClientOptions { Endpoint = new Uri(endpoint) })
+                .GetChatClient(cfg["Google:Model"] ?? "gemini-2.0-flash")
+                .AsIChatClient();
+        }
+        default:
+        {
+            var baseUrl = cfg["Ollama:BaseUrl"] ?? "http://localhost:11434";
+            return new OllamaApiClient(new Uri(baseUrl), cfg["Ollama:Model"] ?? "llama3.2:3b");
+        }
+    }
 });
 
 builder.Services.AddSingleton(sp => TicketTools.Build(sp.GetRequiredService<ITicketProvider>()));

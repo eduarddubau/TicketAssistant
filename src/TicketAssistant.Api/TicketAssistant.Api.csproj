@@ -8,8 +8,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Anthropic" Version="12.36.0" />
     <PackageReference Include="Microsoft.Extensions.AI" Version="10.8.1" />
     <PackageReference Include="Microsoft.Extensions.AI.Abstractions" Version="10.8.1" />
+    <PackageReference Include="Microsoft.Extensions.AI.OpenAI" Version="10.8.1" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.10" />
     <PackageReference Include="Microsoft.OpenApi" Version="2.7.5" />
     <PackageReference Include="OllamaSharp" Version="5.4.27" />
