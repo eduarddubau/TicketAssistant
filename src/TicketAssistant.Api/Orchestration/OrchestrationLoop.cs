@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.AI;
@@ -18,7 +19,13 @@ namespace TicketAssistant.Api.Orchestration;
 /// <param name="chatClient">The LLM (any provider) behind Microsoft.Extensions.AI's interface.</param>
 /// <param name="tools">The AIFunctions the model may call, built by <see cref="TicketTools.Build"/>.</param>
 /// <param name="provider">The ticket backend, used directly for the duplicate-detection lookup.</param>
-public sealed class OrchestrationLoop(IChatClient chatClient, IReadOnlyList<AIFunction> tools, ITicketProvider provider)
+/// <param name="logger">Traces what the model asked for and which guardrails fired — the main
+/// way to see why a turn behaved the way it did without reproducing it live.</param>
+public sealed class OrchestrationLoop(
+    IChatClient chatClient,
+    IReadOnlyList<AIFunction> tools,
+    ITicketProvider provider,
+    ILogger<OrchestrationLoop> logger)
 {
     // Same tools, indexed by name so we can look up the one the model asked for in O(1).
     private readonly Dictionary<string, AIFunction> _toolsByName = tools.ToDictionary(t => t.Name);
@@ -76,10 +83,16 @@ public sealed class OrchestrationLoop(IChatClient chatClient, IReadOnlyList<AIFu
             // Overwrite the call's arguments in history too, so the model summarizes what it
             // actually did (edited values), not the values it first proposed.
             call.Arguments = arguments;
+            logger.LogInformation(
+                "User approved {Tool}{EditedFields}",
+                call.Name,
+                edits is { Count: > 0 } ? $" with edits to: {string.Join(", ", edits.Keys)}" : " unchanged");
+
             result = await InvokeToolAsync(_toolsByName[call.Name], call, ct);
         }
         else
         {
+            logger.LogInformation("User declined {Tool}", call.Name);
             result = $"User declined the {call.Name} action.";
         }
 
@@ -113,13 +126,16 @@ public sealed class OrchestrationLoop(IChatClient chatClient, IReadOnlyList<AIFu
         {
             if (turn >= maxTurns)
             {
+                logger.LogWarning("Giving up after {MaxTurns} turns — the model kept calling tools without finishing", maxTurns);
                 yield return new OrchestrationEvent.AssistantText(
                     "I wasn't able to complete that. Could you rephrase or give me a bit more detail?");
                 yield break;
             }
 
             // 1. Ask the model what to do next, given the whole conversation so far.
+            var stopwatch = Stopwatch.StartNew();
             var response = await chatClient.GetResponseAsync(messages, options, ct);
+            stopwatch.Stop();
             messages.AddMessages(response); // remember its reply (text and/or tool calls)
 
             // 2. Did it ask to call any tools? Pull those out of the reply.
@@ -127,6 +143,10 @@ public sealed class OrchestrationLoop(IChatClient chatClient, IReadOnlyList<AIFu
                 .SelectMany(m => m.Contents)
                 .OfType<FunctionCallContent>()
                 .ToList();
+
+            logger.LogInformation(
+                "Turn {Turn}: model replied in {ElapsedMs}ms with {ToolCallCount} tool call(s) [{Tools}]",
+                turn, stopwatch.ElapsedMilliseconds, calls.Count, string.Join(", ", calls.Select(c => c.Name)));
 
             // 3. No tool calls => it's a plain answer for the user. We're done this turn.
             if (calls.Count == 0)
@@ -136,11 +156,34 @@ public sealed class OrchestrationLoop(IChatClient chatClient, IReadOnlyList<AIFu
             }
 
             // 4. Otherwise handle each requested tool call.
+            //
+            // A model can request several tools at once. At most one write can be confirmed at
+            // a time, so we remember the first one that needs approval and keep processing the
+            // rest — every other call still gets a result. That matters: a tool call left
+            // without a result would dangle in the history and confuse (or error) the next
+            // model turn. The pending call gets its result later, in ResumeAfterConfirmationAsync.
+            FunctionCallContent? pendingConfirmation = null;
+            IDictionary<string, object?>? pendingArguments = null;
+
             foreach (var call in calls)
             {
                 if (TicketTools.RequiresConfirmation(call.Name))
                 {
                     var arguments = call.Arguments ?? new Dictionary<string, object?>();
+
+                    // Only one confirmation dialog at a time — tell the model to re-request
+                    // any further writes once this one is resolved.
+                    if (pendingConfirmation is not null)
+                    {
+                        logger.LogInformation(
+                            "Deferred {Tool}: {PendingTool} is already awaiting confirmation",
+                            call.Name, pendingConfirmation.Name);
+                        messages.Add(new ChatMessage(ChatRole.Tool, [new FunctionResultContent(
+                            call.CallId,
+                            $"Not executed — '{pendingConfirmation.Name}' is already waiting for the user's " +
+                            "confirmation. Ask for this action again once that one has been resolved.")]));
+                        continue;
+                    }
 
                     // create-specific guardrails, checked before surfacing a confirmation card.
                     if (call.Name == TicketTools.CreateTicketToolName)
@@ -148,6 +191,7 @@ public sealed class OrchestrationLoop(IChatClient chatClient, IReadOnlyList<AIFu
                         var missing = MissingCreateTicketFields(arguments);
                         if (missing.Count > 0)
                         {
+                            logger.LogInformation("Blocked create_ticket: missing {MissingFields}", string.Join(", ", missing));
                             messages.Add(new ChatMessage(ChatRole.Tool, [new FunctionResultContent(
                                 call.CallId,
                                 $"Ticket not created — required fields still missing: {string.Join("; ", missing)}. " +
@@ -163,6 +207,9 @@ public sealed class OrchestrationLoop(IChatClient chatClient, IReadOnlyList<AIFu
                             if (duplicates.Count > 0)
                             {
                                 var list = string.Join("; ", duplicates.Select(t => $"{t.Id} \"{t.Title}\" (status {t.Status})"));
+                                logger.LogInformation(
+                                    "Blocked create_ticket: {DuplicateCount} possible duplicate(s) of \"{Title}\": {Duplicates}",
+                                    duplicates.Count, ArgString(arguments, "title"), list);
                                 messages.Add(new ChatMessage(ChatRole.Tool, [new FunctionResultContent(
                                     call.CallId,
                                     $"This user already has a ticket for what looks like the same issue: {list}. " +
@@ -175,15 +222,18 @@ public sealed class OrchestrationLoop(IChatClient chatClient, IReadOnlyList<AIFu
                         }
                     }
 
-                    // Every write tool pauses here for the user to approve (and optionally edit).
-                    yield return new OrchestrationEvent.ConfirmationRequired(call.CallId, call.Name, arguments);
-                    yield break;
+                    // Passed the guardrails: this is the write we'll ask the user about, once
+                    // the remaining calls in this batch have been dealt with.
+                    pendingConfirmation = call;
+                    pendingArguments = arguments;
+                    continue;
                 }
 
                 // A read tool (get/search) — safe to run right away. First guard against the
                 // model hallucinating a tool name we don't actually have.
                 if (!_toolsByName.TryGetValue(call.Name, out var tool))
                 {
+                    logger.LogWarning("Model requested unknown tool {Tool}", call.Name);
                     messages.Add(new ChatMessage(ChatRole.Tool,
                         [new FunctionResultContent(call.CallId, $"Unknown tool '{call.Name}'.")]));
                     yield return new OrchestrationEvent.ToolExecuted(call.Name, Succeeded: false);
@@ -193,8 +243,20 @@ public sealed class OrchestrationLoop(IChatClient chatClient, IReadOnlyList<AIFu
                 // Run it, feed the result back into the conversation, and tell the UI it ran.
                 // The loop then goes around again so the model can use that result.
                 var result = await InvokeToolAsync(tool, call, ct);
+                var failed = result is string s && s.StartsWith("Error:", StringComparison.Ordinal);
+                logger.LogInformation("Ran {Tool} (succeeded: {Succeeded})", call.Name, !failed);
                 messages.Add(new ChatMessage(ChatRole.Tool, [new FunctionResultContent(call.CallId, result)]));
-                yield return new OrchestrationEvent.ToolExecuted(call.Name, Succeeded: true);
+                yield return new OrchestrationEvent.ToolExecuted(call.Name, Succeeded: !failed);
+            }
+
+            // 5. If one of the calls was a write that passed its guardrails, pause here and let
+            // the caller show a confirmation card. Everything else in the batch already ran.
+            if (pendingConfirmation is not null)
+            {
+                logger.LogInformation("Awaiting user confirmation for {Tool}", pendingConfirmation.Name);
+                yield return new OrchestrationEvent.ConfirmationRequired(
+                    pendingConfirmation.CallId, pendingConfirmation.Name, pendingArguments!);
+                yield break;
             }
         }
     }
