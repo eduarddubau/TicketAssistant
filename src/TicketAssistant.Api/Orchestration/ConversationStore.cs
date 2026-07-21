@@ -42,18 +42,52 @@ public sealed class ConversationStore
         returned that result.
         """;
 
+    /// <summary>
+    /// The opening message shown to the user before they type anything: who the assistant is,
+    /// what it can do, and how to start. Deliberately fixed text rather than model-generated —
+    /// it appears instantly, reads the same every time, and can't invent features that don't
+    /// exist. Returned by the create-conversation endpoint so any frontend can display it.
+    /// </summary>
+    public const string Greeting =
+        """
+        👋 Hi! I'm your automated ticketing assistant.
+
+        Here's what I can do for you:
+        • Look up and search your tickets
+        • Open a new ticket
+        • Change a ticket's status — for example resolve or reopen it
+        • Add a comment or update to a ticket
+
+        A few things worth knowing:
+        • I'll always show you a summary and ask before I change anything — and you can edit
+          the details before approving
+        • If I'm missing something (title, description, severity), I'll ask you for it
+        • If you already have a ticket for the same issue, I'll offer to reopen or update it
+          instead of creating a duplicate
+        • You only ever see the tickets you created
+
+        How can I help you today? Just describe the issue in your own words — for example:
+        "the login page returns a 500 error when I submit".
+        """;
+
     // Thread-safe map of conversation id -> its list of messages (system, user, assistant,
     // tool). ConcurrentDictionary because multiple requests may touch the store at once.
     private readonly ConcurrentDictionary<Guid, List<ChatMessage>> _conversations = new();
 
     /// <summary>
-    /// Starts a new conversation: generates an id, seeds the history with the system prompt,
-    /// and returns the id for the client to use on subsequent messages.
+    /// Starts a new conversation: generates an id and seeds the history with the system
+    /// prompt plus the greeting (recorded as the assistant's opening turn, so the model knows
+    /// it has already introduced itself and doesn't repeat it). Returns the id for the client
+    /// to use on subsequent messages.
     /// </summary>
     public Guid Create()
     {
         var id = Guid.NewGuid();
-        _conversations[id] = [new ChatMessage(ChatRole.System, SystemPrompt)];
+        _conversations[id] =
+        [
+            new ChatMessage(ChatRole.System, SystemPrompt),
+            new ChatMessage(ChatRole.Assistant, Greeting)
+        ];
         return id;
     }
 

@@ -103,6 +103,8 @@
       cidLabel.textContent = conversationId;
       log.innerHTML = '';
       add('tool', 'conversation ' + conversationId + ' · user: ' + userId);
+      // The server supplies the opening message, so every frontend greets identically.
+      if (data.greeting) add('assistant', data.greeting);
     }
 
     // Reads an SSE (text/event-stream) response body and dispatches each JSON event.
