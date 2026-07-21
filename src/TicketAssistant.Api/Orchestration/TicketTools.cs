@@ -22,10 +22,14 @@ public static class TicketTools
     public const string CreateTicketToolName = "create_ticket";
     public const string UpdateStatusToolName = "update_ticket_status";
     public const string AddCommentToolName = "add_comment";
+    public const string ResolveTicketToolName = "resolve_ticket";
 
     // The tools that change a ticket and therefore need explicit user approval.
     private static readonly HashSet<string> ConfirmationRequiredTools =
-        new(StringComparer.Ordinal) { CreateTicketToolName, UpdateStatusToolName, AddCommentToolName };
+        new(StringComparer.Ordinal)
+        {
+            CreateTicketToolName, UpdateStatusToolName, AddCommentToolName, ResolveTicketToolName
+        };
 
     /// <summary>Whether a tool mutates a ticket and so needs the user to confirm it first.</summary>
     public static bool RequiresConfirmation(string toolName) => ConfirmationRequiredTools.Contains(toolName);
@@ -91,6 +95,21 @@ public static class TicketTools
                 name: UpdateStatusToolName,
                 description: "Change an existing ticket's status. Never executed automatically — the " +
                               "caller shows the user a confirmation card and gets explicit approval first."),
+
+            AIFunctionFactory.Create(
+                // Closing a ticket almost always comes with a "why", so this does both in one
+                // action (and therefore one confirmation) instead of a status change + comment.
+                async (string ticketId, string note, CancellationToken ct) =>
+                {
+                    var ticket = await provider.UpdateTicketStatusAsync(ticketId, TicketStatus.Resolved, ct);
+                    await provider.AddCommentAsync(ticketId, note, ct);
+                    return ticket;
+                },
+                name: ResolveTicketToolName,
+                description: "Resolve a ticket and record why in one step: sets the status to Resolved " +
+                              "and adds the note as a comment. Prefer this over update_ticket_status when " +
+                              "the user is closing something out. Ask for a short resolution note if they " +
+                              "haven't given one."),
 
             AIFunctionFactory.Create(
                 (string ticketId, string body, CancellationToken ct) =>

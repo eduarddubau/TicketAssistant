@@ -179,6 +179,15 @@
           edits: () => ({ status: status.el.value })
         };
       }
+      if (evt.toolName === 'resolve_ticket') {
+        const tid = field('Ticket', 'text', { value: a.ticketId, readonly: true });
+        const note = field('Resolution note', 'textarea', { value: a.note, required: true });
+        return {
+          heading: '⚠️ Confirm resolve', verb: 'Resolve ticket',
+          fields: [tid, note],
+          edits: () => ({ note: note.value() })
+        };
+      }
       if (evt.toolName === 'add_comment') {
         const tid = field('Ticket', 'text', { value: a.ticketId, readonly: true });
         const body = field('Comment', 'textarea', { value: a.body, required: true });
