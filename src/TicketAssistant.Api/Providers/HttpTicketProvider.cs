@@ -32,6 +32,18 @@ public sealed class HttpTicketProvider(HttpClient http) : ITicketProvider
         return results.Select(Map).ToList();
     }
 
+    public async Task<IReadOnlyList<CanonicalTicket>> ListTicketsAsync(
+        TicketStatus? status = null, TicketPriority? priority = null, CancellationToken ct = default)
+    {
+        var query = new List<string>();
+        if (status is not null) query.Add($"status={status}");
+        if (priority is not null) query.Add($"priority={priority}");
+        var url = "/api/tickets" + (query.Count > 0 ? "?" + string.Join("&", query) : "");
+
+        var results = await http.GetFromJsonAsync<List<TicketDto>>(url, Json, ct) ?? [];
+        return results.Select(Map).ToList();
+    }
+
     public async Task<CanonicalTicket> CreateTicketAsync(CreateTicketRequest request, CancellationToken ct = default)
     {
         var body = new

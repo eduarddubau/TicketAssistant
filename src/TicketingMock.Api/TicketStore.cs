@@ -26,9 +26,18 @@ public sealed class TicketStore
     private static bool OwnedBy(MockTicket ticket, string? owner) =>
         string.IsNullOrEmpty(owner) || string.Equals(ticket.Owner, owner, StringComparison.OrdinalIgnoreCase);
 
-    public IReadOnlyList<MockTicket> All(string? owner) =>
+    /// <summary>
+    /// The owner's tickets, optionally filtered by status and/or priority (case-insensitive;
+    /// null/empty means "don't filter on this"). Backs both the board and the assistant's
+    /// list_tickets tool — the structured alternative to free-text search.
+    /// </summary>
+    public IReadOnlyList<MockTicket> All(string? owner, string? status = null, string? priority = null) =>
         _tickets.Values
             .Where(t => OwnedBy(t, owner))
+            .Where(t => string.IsNullOrWhiteSpace(status)
+                        || string.Equals(t.Status, status, StringComparison.OrdinalIgnoreCase))
+            .Where(t => string.IsNullOrWhiteSpace(priority)
+                        || string.Equals(t.Priority, priority, StringComparison.OrdinalIgnoreCase))
             .OrderByDescending(t => t.CreatedAt)
             .ToList();
 

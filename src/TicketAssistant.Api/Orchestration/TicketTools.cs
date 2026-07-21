@@ -47,7 +47,18 @@ public static class TicketTools
             AIFunctionFactory.Create(
                 (string query, CancellationToken ct) => provider.SearchTicketsAsync(query, ct),
                 name: "search_tickets",
-                description: "Search tickets by title/description text."),
+                description: "Search tickets by words appearing in their title, description or labels " +
+                              "(e.g. 'login', 'printer'). This matches text only — to filter by status " +
+                              "or priority use list_tickets instead."),
+
+            AIFunctionFactory.Create(
+                (TicketStatus? status, TicketPriority? priority, CancellationToken ct) =>
+                    provider.ListTicketsAsync(status, priority, ct),
+                name: "list_tickets",
+                description: "List the user's tickets, optionally filtered by status (Open, InProgress, " +
+                              "Blocked, Resolved, Closed) and/or priority (Low, Medium, High, Urgent). " +
+                              "Use this for questions like 'my open tickets', 'anything urgent?', or " +
+                              "'all my tickets' — omit both filters to list everything."),
 
             AIFunctionFactory.Create(
                 // createAnyway is read by OrchestrationLoop (not used here): the loop blocks a

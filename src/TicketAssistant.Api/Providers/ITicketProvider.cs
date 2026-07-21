@@ -20,6 +20,14 @@ public interface ITicketProvider
     /// <summary>Find tickets matching free text (empty query = all the caller's tickets).</summary>
     Task<IReadOnlyList<CanonicalTicket>> SearchTicketsAsync(string query, CancellationToken ct = default);
 
+    /// <summary>
+    /// List the caller's tickets, optionally narrowed by status and/or priority. This is the
+    /// structured counterpart to <see cref="SearchTicketsAsync"/> — use it for "my open
+    /// tickets" or "anything urgent", which free-text search cannot answer.
+    /// </summary>
+    Task<IReadOnlyList<CanonicalTicket>> ListTicketsAsync(
+        TicketStatus? status = null, TicketPriority? priority = null, CancellationToken ct = default);
+
     /// <summary>Create a new ticket and return it (with its assigned id/URL).</summary>
     Task<CanonicalTicket> CreateTicketAsync(CreateTicketRequest request, CancellationToken ct = default);
 

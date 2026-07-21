@@ -35,6 +35,18 @@ public sealed class InMemoryTicketProvider : ITicketProvider
         return Task.FromResult(matches);
     }
 
+    public Task<IReadOnlyList<CanonicalTicket>> ListTicketsAsync(
+        TicketStatus? status = null, TicketPriority? priority = null, CancellationToken ct = default)
+    {
+        IReadOnlyList<CanonicalTicket> matches = _tickets.Values
+            .Where(t => status is null || t.Status == status)
+            .Where(t => priority is null || t.Priority == priority)
+            .OrderByDescending(t => t.CreatedAt)
+            .ToList();
+
+        return Task.FromResult(matches);
+    }
+
     public Task<CanonicalTicket> CreateTicketAsync(CreateTicketRequest request, CancellationToken ct = default)
     {
         var id = $"PROJ-{Interlocked.Increment(ref _nextId)}";
