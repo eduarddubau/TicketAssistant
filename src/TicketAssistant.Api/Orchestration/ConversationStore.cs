@@ -63,15 +63,15 @@ public sealed class ConversationStore
 
         Here's what I can do for you:
         • Look up and search your tickets, or list them by status or priority
-        • Give you a summary of where everything stands
+        • Give you a summary of where everything stands, including anything overdue
         • Open a new ticket
         • Resolve a ticket with a note, or change its status — for example reopen it
-        • Add a comment or update to a ticket
-        • Set a due date, and flag anything overdue
+        • Add a comment, assign it to someone, or set a due date
 
         A few things worth knowing:
         • I'll always show you a summary and ask before I change anything — and you can edit
           the details before approving
+        • Changed your mind? Just say "undo that" and I'll reverse my last change
         • If I'm missing something (title, description, severity), I'll ask you for it
         • If you already have a ticket for the same issue, I'll offer to reopen or update it
           instead of creating a duplicate
