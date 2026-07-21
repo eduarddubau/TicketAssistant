@@ -1,3 +1,8 @@
+// Application entry point. This file has two halves:
+//   1. Service registration (dependency injection) — wire up the LLM client, the ticket
+//      backend, and the orchestration pieces.
+//   2. The HTTP pipeline — middleware and the three chat endpoints.
+// .NET "top-level statements": the code below runs directly, no Main method needed.
 using System.ClientModel;
 using System.Text.Json;
 using Anthropic;
@@ -10,13 +15,14 @@ using TicketAssistant.Api.Providers;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Allow the Angular dev server (future frontend) to call this API from another origin.
 const string AngularDevCorsPolicy = "AngularDev";
 builder.Services.AddCors(options => options.AddPolicy(AngularDevCorsPolicy, policy =>
     policy.WithOrigins("http://localhost:4200").AllowAnyMethod().AllowAnyHeader()));
 
-builder.Services.AddOpenApi();
-builder.Services.AddHttpContextAccessor();
-builder.Services.AddTransient<UserIdForwardingHandler>();
+builder.Services.AddOpenApi();                              // OpenAPI doc for the Scalar UI
+builder.Services.AddHttpContextAccessor();                  // lets the handler below read the request
+builder.Services.AddTransient<UserIdForwardingHandler>();   // forwards X-User-Id to the ticket backend
 
 // Tickets:Backend switches the ITicketProvider implementation. "Http" (default) calls an
 // external ticketing system over REST (the TicketingMock.Api service in this repo);
@@ -78,12 +84,16 @@ builder.Services.AddSingleton<IChatClient>(sp =>
     }
 });
 
+// Build the tool menu from whichever provider was registered above, then the loop (which
+// takes the chat client + tools + provider) and the conversation memory. All singletons:
+// one shared instance for the app's lifetime.
 builder.Services.AddSingleton(sp => TicketTools.Build(sp.GetRequiredService<ITicketProvider>()));
 builder.Services.AddSingleton<OrchestrationLoop>();
 builder.Services.AddSingleton<ConversationStore>();
 
 var app = builder.Build();
 
+// ----- HTTP pipeline -----
 app.UseCors(AngularDevCorsPolicy);
 
 // Serves wwwroot/index.html at "/" — a minimal SSE chat client for testing the API
@@ -97,9 +107,12 @@ if (app.Environment.IsDevelopment())
     app.MapScalarApiReference(); // http://localhost:<port>/scalar/v1
 }
 
+// Start a new chat; returns its id for the client to use on the calls below.
 app.MapPost("/api/conversations", (ConversationStore store) =>
     Results.Ok(new { conversationId = store.Create() }));
 
+// Send a user message. Appends it to the conversation, runs the loop, and streams the
+// resulting events (assistant text / tools ran / a confirmation request) back as SSE.
 app.MapPost("/api/conversations/{id:guid}/messages", async (
     Guid id,
     ChatRequest request,
@@ -114,6 +127,8 @@ app.MapPost("/api/conversations/{id:guid}/messages", async (
     await WriteSseAsync(http.Response, loop.RunAsync(messages, ct), ct);
 });
 
+// Answer to a confirmation card: approve (optionally with edits) or decline the paused
+// write, then resume the loop and stream what happens next.
 app.MapPost("/api/conversations/{id:guid}/confirm", async (
     Guid id,
     ConfirmRequest request,
@@ -133,6 +148,9 @@ app.MapPost("/api/conversations/{id:guid}/confirm", async (
 
 app.Run();
 
+// Streams the loop's events to the browser as Server-Sent Events: each event is turned into
+// a small JSON object and written as a "data: {...}" frame, flushed immediately so the UI
+// updates live instead of waiting for the whole turn to finish.
 static async Task WriteSseAsync(
     HttpResponse response,
     IAsyncEnumerable<OrchestrationEvent> events,
@@ -143,6 +161,7 @@ static async Task WriteSseAsync(
 
     await foreach (var evt in events.WithCancellation(ct))
     {
+        // Translate the internal event record into the JSON shape the browser expects.
         object payload = evt switch
         {
             OrchestrationEvent.AssistantText e => new { type = "assistant_text", text = e.Text },
@@ -162,6 +181,7 @@ static async Task WriteSseAsync(
     }
 }
 
+// Request body for POST .../messages: the user's chat text.
 internal sealed record ChatRequest(string Text);
 
 // Edits holds the (optionally user-modified) tool arguments keyed by parameter name —

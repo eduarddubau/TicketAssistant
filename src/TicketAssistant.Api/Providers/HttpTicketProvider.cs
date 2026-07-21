@@ -12,6 +12,8 @@ namespace TicketAssistant.Api.Providers;
 /// </summary>
 public sealed class HttpTicketProvider(HttpClient http) : ITicketProvider
 {
+    // Web defaults = camelCase property names + case-insensitive matching, to line up with
+    // what ASP.NET Core minimal APIs emit on the mock side.
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
     public string Name => "mock-ticketing";
@@ -68,6 +70,9 @@ public sealed class HttpTicketProvider(HttpClient http) : ITicketProvider
         return new TicketComment { Author = dto.Author, Body = dto.Body, CreatedAt = dto.CreatedAt };
     }
 
+    // Converts the remote system's wire shape (strings for status/priority) into the app's
+    // strongly-typed CanonicalTicket. Unknown status/priority text falls back to a sensible
+    // default rather than throwing, so an unexpected value from the backend can't break a read.
     private CanonicalTicket Map(TicketDto d) => new()
     {
         Id = d.Id,
@@ -84,7 +89,8 @@ public sealed class HttpTicketProvider(HttpClient http) : ITicketProvider
         Url = new Uri(d.Url)
     };
 
-    // Shapes matching TicketingMock.Api's JSON responses.
+    // Private DTOs mirroring TicketingMock.Api's JSON so System.Text.Json can deserialize
+    // into them; Map() then translates a DTO into the app's CanonicalTicket/TicketComment.
     private sealed record TicketDto(
         string Id, string Title, string? Description, string Status, string Priority,
         string? Assignee, string? Reporter, List<string>? Labels,

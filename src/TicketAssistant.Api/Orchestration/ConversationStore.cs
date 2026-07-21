@@ -4,12 +4,20 @@ using Microsoft.Extensions.AI;
 namespace TicketAssistant.Api.Orchestration;
 
 /// <summary>
-/// In-memory conversation history keyed by conversation id. Fine for a single-instance
-/// dev setup; swap for a persisted store (e.g. EF Core + Postgres) before this needs to
-/// survive a restart or run behind more than one instance.
+/// Remembers each chat's message history. The model itself is stateless — it forgets
+/// everything between HTTP requests — so we must keep the full running transcript here and
+/// resend it on every turn. Conversations are keyed by a Guid the client passes back each
+/// time. In-memory only: fine for a single-instance dev setup, but restarting the app wipes
+/// all chats; swap for a persisted store (e.g. EF Core + Postgres) for anything real.
 /// </summary>
 public sealed class ConversationStore
 {
+    /// <summary>
+    /// The standing instructions given to the model at the very start of every conversation
+    /// (as a "system" message). This is where the assistant's behavior is defined in plain
+    /// English: gather required fields, ask when something's missing, avoid duplicates, and
+    /// never fabricate results. Changing this text changes how the assistant behaves.
+    /// </summary>
     private const string SystemPrompt =
         """
         You are a support-ticket assistant. You can look up, search, create, update, and
@@ -34,8 +42,14 @@ public sealed class ConversationStore
         returned that result.
         """;
 
+    // Thread-safe map of conversation id -> its list of messages (system, user, assistant,
+    // tool). ConcurrentDictionary because multiple requests may touch the store at once.
     private readonly ConcurrentDictionary<Guid, List<ChatMessage>> _conversations = new();
 
+    /// <summary>
+    /// Starts a new conversation: generates an id, seeds the history with the system prompt,
+    /// and returns the id for the client to use on subsequent messages.
+    /// </summary>
     public Guid Create()
     {
         var id = Guid.NewGuid();
@@ -43,6 +57,10 @@ public sealed class ConversationStore
         return id;
     }
 
+    /// <summary>
+    /// Returns the live message list for a conversation so the caller can append to it and
+    /// pass it to the loop. Throws if the id is unknown (e.g. after an app restart).
+    /// </summary>
     public List<ChatMessage> Get(Guid conversationId)
     {
         if (!_conversations.TryGetValue(conversationId, out var messages))

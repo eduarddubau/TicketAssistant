@@ -5,24 +5,36 @@ using TicketAssistant.Api.Providers;
 namespace TicketAssistant.Api.Orchestration;
 
 /// <summary>
-/// Exposes an ITicketProvider as AIFunctions the model can call. The write tools listed
-/// in <see cref="RequiresConfirmation"/> are special-cased by OrchestrationLoop: they are
-/// described here like any other tool, but the loop intercepts them before invocation and
-/// asks the user to confirm (and optionally edit) instead of running them automatically.
-/// Read tools (get/search) run immediately.
+/// Builds the "menu" of actions the model is allowed to take. A tool (an
+/// <c>AIFunction</c>) is just a named C# function plus a plain-English description; we hand
+/// this list to the model, and it decides which to call and with what arguments. Each tool
+/// here simply forwards to the matching <see cref="ITicketProvider"/> method.
+///
+/// The write tools listed in <see cref="RequiresConfirmation"/> are special-cased by
+/// OrchestrationLoop: they're described here like any other tool, but the loop intercepts
+/// them before running and asks the user to confirm (and optionally edit) first. Read tools
+/// (get/search) run immediately.
 /// </summary>
 public static class TicketTools
 {
+    // Tool names are referenced in several places (here, the loop, the browser dialog), so
+    // they live as constants to avoid typos and keep everything in sync.
     public const string CreateTicketToolName = "create_ticket";
     public const string UpdateStatusToolName = "update_ticket_status";
     public const string AddCommentToolName = "add_comment";
 
+    // The tools that change a ticket and therefore need explicit user approval.
     private static readonly HashSet<string> ConfirmationRequiredTools =
         new(StringComparer.Ordinal) { CreateTicketToolName, UpdateStatusToolName, AddCommentToolName };
 
     /// <summary>Whether a tool mutates a ticket and so needs the user to confirm it first.</summary>
     public static bool RequiresConfirmation(string toolName) => ConfirmationRequiredTools.Contains(toolName);
 
+    /// <summary>
+    /// Wraps each provider method as an AIFunction the model can call. AIFunctionFactory.Create
+    /// inspects the lambda's parameters to generate the schema the model sees, so parameter
+    /// names/types and the description text are effectively the model's API documentation.
+    /// </summary>
     public static IReadOnlyList<AIFunction> Build(ITicketProvider provider)
     {
         return
