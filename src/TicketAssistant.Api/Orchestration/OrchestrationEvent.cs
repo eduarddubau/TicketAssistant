@@ -15,6 +15,13 @@ public abstract record OrchestrationEvent
     public sealed record AssistantText(string Text) : OrchestrationEvent;
 
     /// <summary>
+    /// A fragment of the reply as the model generates it. The UI appends consecutive deltas
+    /// into one growing message, so text appears immediately instead of after the whole
+    /// response is complete. Any other event ends the current message.
+    /// </summary>
+    public sealed record AssistantTextDelta(string Text) : OrchestrationEvent;
+
+    /// <summary>
     /// A tool finished running (e.g. search_tickets). Carries which tool and whether it
     /// succeeded, so the UI can show a small status line like "🔧 search_tickets ✓".
     /// </summary>

@@ -168,6 +168,7 @@ static async Task WriteSseAsync(
         object payload = evt switch
         {
             OrchestrationEvent.AssistantText e => new { type = "assistant_text", text = e.Text },
+            OrchestrationEvent.AssistantTextDelta e => new { type = "assistant_delta", text = e.Text },
             OrchestrationEvent.ToolExecuted e => new { type = "tool_executed", toolName = e.ToolName, succeeded = e.Succeeded },
             OrchestrationEvent.ConfirmationRequired e => new
             {

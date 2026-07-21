@@ -140,10 +140,25 @@ public sealed class OrchestrationLoop(
                 yield break;
             }
 
-            // 1. Ask the model what to do next, given the whole conversation so far.
+            // 1. Ask the model what to do next, given the whole conversation so far. Streaming
+            // so its words reach the user as they're generated rather than after the full
+            // reply is ready; the fragments are then reassembled into one response for history.
             var stopwatch = Stopwatch.StartNew();
-            var response = await chatClient.GetResponseAsync(messages, options, ct);
+            var updates = new List<ChatResponseUpdate>();
+            var streamedText = false;
+
+            await foreach (var update in chatClient.GetStreamingResponseAsync(messages, options, ct))
+            {
+                updates.Add(update);
+                if (!string.IsNullOrEmpty(update.Text))
+                {
+                    streamedText = true;
+                    yield return new OrchestrationEvent.AssistantTextDelta(update.Text);
+                }
+            }
+
             stopwatch.Stop();
+            var response = updates.ToChatResponse();
             messages.AddMessages(response); // remember its reply (text and/or tool calls)
 
             // 2. Did it ask to call any tools? Pull those out of the reply.
@@ -157,9 +172,15 @@ public sealed class OrchestrationLoop(
                 turn, stopwatch.ElapsedMilliseconds, calls.Count, string.Join(", ", calls.Select(c => c.Name)));
 
             // 3. No tool calls => it's a plain answer for the user. We're done this turn.
+            // If the reply already went out as deltas the UI has it; only send the whole text
+            // when nothing streamed (some providers return it in one piece).
             if (calls.Count == 0)
             {
-                yield return new OrchestrationEvent.AssistantText(response.Text);
+                if (!streamedText)
+                {
+                    yield return new OrchestrationEvent.AssistantText(response.Text);
+                }
+
                 yield break;
             }
 

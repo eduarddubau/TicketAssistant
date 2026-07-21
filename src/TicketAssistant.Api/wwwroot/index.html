@@ -109,6 +109,7 @@
 
     // Reads an SSE (text/event-stream) response body and dispatches each JSON event.
     async function consume(res) {
+      streamingBubble = null;   // each request starts a fresh message
       if (!res.ok) { add('err', 'HTTP ' + res.status + ' ' + res.statusText); return; }
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
@@ -127,7 +128,20 @@
       }
     }
 
+    // The bubble currently being streamed into, so consecutive deltas append to one message.
+    let streamingBubble = null;
+
     function handleEvent(evt) {
+      if (evt.type === 'assistant_delta') {
+        if (!streamingBubble) streamingBubble = add('assistant', '');
+        streamingBubble.textContent += evt.text;
+        log.scrollTop = log.scrollHeight;
+        return;
+      }
+
+      // Anything else ends the message that was streaming.
+      streamingBubble = null;
+
       if (evt.type === 'assistant_text') add('assistant', evt.text);
       else if (evt.type === 'tool_executed') add('tool', '🔧 ' + evt.toolName + (evt.succeeded ? ' ✓' : ' ✗'));
       else if (evt.type === 'confirmation_required') renderConfirmation(evt);
