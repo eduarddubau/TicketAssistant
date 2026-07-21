@@ -38,6 +38,11 @@ public sealed class ConversationStore
         back to Open), add an update/comment to it, or create a separate new ticket. Only
         create a new one if the user explicitly asks for it.
 
+        If the user asks how things stand — a summary, an overview, a status report, "what's
+        outstanding?" — call list_tickets and reply with a short digest rather than dumping
+        every field: how many tickets there are, the breakdown by status, and anything Urgent
+        or High priority that deserves attention. A few lines is plenty.
+
         Never invent ticket IDs or claim an action succeeded unless a tool call actually
         returned that result.
         """;
@@ -53,9 +58,10 @@ public sealed class ConversationStore
         👋 Hi! I'm your automated ticketing assistant.
 
         Here's what I can do for you:
-        • Look up and search your tickets
+        • Look up and search your tickets, or list them by status or priority
+        • Give you a summary of where everything stands
         • Open a new ticket
-        • Change a ticket's status — for example resolve or reopen it
+        • Resolve a ticket with a note, or change its status — for example reopen it
         • Add a comment or update to a ticket
 
         A few things worth knowing:
