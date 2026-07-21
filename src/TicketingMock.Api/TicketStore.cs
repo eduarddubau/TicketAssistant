@@ -79,6 +79,7 @@ public sealed class TicketStore
             Url = $"{_publicBaseUrl}/#{id}"
         };
 
+        ticket.History.Add(new MockEvent($"created with priority {ticket.Priority}", ticket.CreatedAt));
         _tickets[id] = ticket;
         return ticket;
     }
@@ -90,8 +91,10 @@ public sealed class TicketStore
             return null;
         }
 
+        var previous = ticket.Status;
         ticket.Status = status;
         ticket.UpdatedAt = DateTimeOffset.UtcNow;
+        ticket.History.Add(new MockEvent($"status {previous} -> {status}", ticket.UpdatedAt.Value));
         return ticket;
     }
 
@@ -103,8 +106,10 @@ public sealed class TicketStore
             return null;
         }
 
+        var previous = ticket.Assignee ?? "unassigned";
         ticket.Assignee = string.IsNullOrWhiteSpace(assignee) ? null : assignee;
         ticket.UpdatedAt = DateTimeOffset.UtcNow;
+        ticket.History.Add(new MockEvent($"assignee {previous} -> {ticket.Assignee ?? "unassigned"}", ticket.UpdatedAt.Value));
         return ticket;
     }
 
@@ -118,11 +123,10 @@ public sealed class TicketStore
         var comment = new MockComment(author, body, DateTimeOffset.UtcNow);
         ticket.Comments.Add(comment);
         ticket.UpdatedAt = DateTimeOffset.UtcNow;
+        ticket.History.Add(new MockEvent($"comment added by {author}", ticket.UpdatedAt.Value));
         return comment;
     }
 
-    // Demo data owned by "alice" so the default console user sees a populated board;
-    // switch the user in the console to see isolation (a different user starts empty).
     /// <summary>Removes a ticket entirely. Used to undo a create.</summary>
     public bool Delete(string id, string? owner)
     {
@@ -144,9 +148,12 @@ public sealed class TicketStore
 
         ticket.Comments.RemoveAt(ticket.Comments.Count - 1);
         ticket.UpdatedAt = DateTimeOffset.UtcNow;
+        ticket.History.Add(new MockEvent("comment removed (undo)", ticket.UpdatedAt.Value));
         return true;
     }
 
+    // Demo data owned by "alice" so the default console user sees a populated board;
+    // switch the user in the console to see isolation (a different user starts empty).
     private void Seed()
     {
         Create(new CreateTicketBody(

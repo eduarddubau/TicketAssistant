@@ -24,10 +24,16 @@ public sealed class MockTicket
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? UpdatedAt { get; set; }
     public List<MockComment> Comments { get; set; } = [];
+
+    /// <summary>What has happened to this ticket, oldest first — created, status changes, etc.</summary>
+    public List<MockEvent> History { get; set; } = [];
     public string Url { get; set; } = "";
 }
 
 public sealed record MockComment(string Author, string Body, DateTimeOffset CreatedAt);
+
+/// <summary>A single entry in a ticket's audit trail.</summary>
+public sealed record MockEvent(string Description, DateTimeOffset At);
 
 // Request bodies accepted by the API.
 public sealed record CreateTicketBody(

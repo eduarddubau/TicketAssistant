@@ -41,6 +41,10 @@
     .labels { display: flex; gap: .35rem; flex-wrap: wrap; }
     .label { font-size: 11px; padding: .1rem .45rem; border-radius: 5px; background: color-mix(in srgb, CanvasText 10%, transparent); }
     .meta { font-size: 12px; opacity: .6; display: flex; gap: .75rem; flex-wrap: wrap; margin-top: .25rem; }
+    .history { margin-top: .5rem; border-top: 1px dashed color-mix(in srgb, CanvasText 20%, transparent); padding-top: .4rem; }
+    .history summary { font-size: 12px; opacity: .6; cursor: pointer; }
+    .history ul { margin: .35rem 0 0; padding-left: 1.1rem; font-size: 12px; opacity: .75; }
+    .history li { margin-bottom: .15rem; }
     .empty { grid-column: 1/-1; text-align: center; opacity: .5; padding: 3rem; }
   </style>
 </head>
@@ -72,6 +76,12 @@
       const isFresh = !first && !seen.has(t.id);
       const labels = (t.labels || []).map(l => `<span class="label">${esc(l)}</span>`).join('');
       const comments = (t.comments || []).length;
+      const history = (t.history || []);
+      const historyHtml = history.length
+        ? `<details class="history"><summary>${history.length} event${history.length === 1 ? '' : 's'}</summary><ul>` +
+          history.map(h => `<li>${esc(h.description)} <span style="opacity:.6">· ${timeAgo(h.at)}</span></li>`).join('') +
+          `</ul></details>`
+        : '';
       return `<article class="card ${isFresh ? 'fresh' : ''}">
         <div class="top"><span class="id">${esc(t.id)}</span></div>
         <h2>${esc(t.title)}</h2>
@@ -88,6 +98,7 @@
           <span>💬 ${comments}</span>
           <span>🕓 ${timeAgo(t.createdAt)}</span>
         </div>
+        ${historyHtml}
       </article>`;
     }
 
