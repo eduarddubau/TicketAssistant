@@ -13,15 +13,24 @@ approval before it changes anything.
 ## What it demonstrates
 
 - **LLM orchestration** — a hand-written tool-calling loop (send messages + tools → run the
-  tools the model asks for → feed results back → repeat) rather than a black-box framework.
+  tools the model asks for → feed results back → repeat) rather than a black-box framework,
+  with replies **streamed** token by token.
 - **Provider-agnostic design** — the assistant talks to abstractions, so you can swap the
-  **LLM** (Ollama / Anthropic / OpenAI / Google) or the **ticket backend** without touching
-  the orchestration logic.
-- **Human-in-the-loop writes** — every action that changes a ticket (create, status change,
-  comment) pauses for a confirmation card the user can **edit** before approving.
+  **LLM** (Ollama / Anthropic / OpenAI / Google — switchable live from the console) or the
+  **ticket backend** without touching the orchestration logic.
+- **Human-in-the-loop writes** — every action that changes a ticket pauses for a confirmation
+  card the user can **edit** before approving, and the last change can be **undone**.
 - **Guardrails** — the assistant asks for missing fields instead of guessing, and detects
-  likely **duplicate** tickets and offers to reopen/update the existing one.
+  likely **duplicate** tickets, offering to reopen/update the existing one (and linking the
+  two if you create a separate ticket anyway).
 - **Per-user scoping** — a user only sees tickets they created.
+
+### What the assistant can do
+
+Look up, search, and **list by status/priority** · **summarize** where everything stands ·
+create tickets · **resolve with a note** · change status (reopen) · comment · **assign** ·
+set **due dates** and flag anything **overdue** · **undo** the last change. Every ticket keeps
+an **audit trail** of what changed and when.
 
 ## Architecture
 
