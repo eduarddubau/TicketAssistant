@@ -13,6 +13,7 @@
     <PackageReference Include="Microsoft.Extensions.AI.Abstractions" Version="10.8.1" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.10" />
     <PackageReference Include="Microsoft.OpenApi" Version="2.7.5" />
+    <PackageReference Include="OllamaSharp" Version="5.4.27" />
     <PackageReference Include="Scalar.AspNetCore" Version="2.16.16" />
   </ItemGroup>
 
