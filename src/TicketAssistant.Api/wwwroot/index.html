@@ -32,10 +32,17 @@
       align-self: flex-start; max-width: 60ch; border: 1px solid #f59e0b;
       border-radius: 10px; padding: .8rem; background: color-mix(in srgb, #f59e0b 10%, Canvas);
     }
-    .card h3 { margin: 0 0 .5rem; font-size: .9rem; }
+    .card h3 { margin: 0 0 .6rem; font-size: .9rem; }
     .card pre { margin: 0 0 .6rem; font-size: 12px; overflow-x: auto; }
-    .card .actions { display: flex; gap: .5rem; }
+    .card .fld { display: flex; flex-direction: column; gap: .2rem; font-size: 12px; font-weight: 600; opacity: .85; margin-bottom: .55rem; }
+    .card .fld input, .card .fld textarea, .card .fld select {
+      font: inherit; font-weight: 400; padding: .4rem .55rem; border-radius: 6px;
+      border: 1px solid color-mix(in srgb, CanvasText 25%, transparent); background: Canvas; color: inherit;
+    }
+    .card .fld textarea { resize: vertical; }
+    .card .actions { display: flex; gap: .5rem; margin-top: .2rem; }
     .card button { padding: .35rem .8rem; border-radius: 6px; cursor: pointer; border: none; font-weight: 600; }
+    .card button:disabled { opacity: .5; cursor: default; }
     .approve { background: #16a34a; color: #fff; }
     .decline { background: color-mix(in srgb, CanvasText 15%, Canvas); color: inherit; }
     form { display: flex; gap: .5rem; padding: .75rem 1rem; border-top: 1px solid color-mix(in srgb, CanvasText 15%, transparent); }
@@ -124,30 +131,114 @@
       else if (evt.type === 'confirmation_required') renderConfirmation(evt);
     }
 
+    const SEVERITIES = ['Low', 'Medium', 'High', 'Urgent'];
+    const STATUSES = ['Open', 'InProgress', 'Blocked', 'Resolved', 'Closed'];
+
+    // Builds a labelled field element; returns { row, el, value(), required }.
+    function field(label, kind, opts = {}) {
+      const row = document.createElement('label');
+      row.className = 'fld';
+      row.append(label);
+      let el;
+      if (kind === 'select') {
+        el = document.createElement('select');
+        for (const o of opts.options) { const op = document.createElement('option'); op.textContent = o; el.append(op); }
+        el.value = opts.options.includes(opts.value) ? opts.value : opts.options[0];
+      } else {
+        el = document.createElement(kind === 'textarea' ? 'textarea' : 'input');
+        if (kind === 'textarea') el.rows = 3; else el.type = 'text';
+        el.value = opts.value || '';
+        if (opts.readonly) el.disabled = true;
+      }
+      row.append(el);
+      return { row, el, value: () => (el.value || '').trim(), required: !!opts.required };
+    }
+
+    // Per-tool confirmation dialogs. Each returns { heading, verb, fields (in display order),
+    // edits() -> object of edited args to send }.
+    function confirmationSpec(evt) {
+      const a = evt.arguments || {};
+      if (evt.toolName === 'create_ticket') {
+        const title = field('Title', 'text', { value: a.title, required: true });
+        const desc = field('Description', 'textarea', { value: a.description, required: true });
+        const sev = field('Severity', 'select', { options: SEVERITIES, value: a.priority || 'Medium' });
+        return {
+          heading: '⚠️ Review & confirm new ticket', verb: 'Create ticket',
+          fields: [title, desc, sev],
+          edits: () => ({ title: title.value(), description: desc.value(), priority: sev.el.value })
+        };
+      }
+      if (evt.toolName === 'update_ticket_status') {
+        const tid = field('Ticket', 'text', { value: a.ticketId, readonly: true });
+        const status = field('New status', 'select', { options: STATUSES, value: a.status });
+        return {
+          heading: '⚠️ Confirm status change', verb: 'Update status',
+          fields: [tid, status],
+          edits: () => ({ status: status.el.value })
+        };
+      }
+      if (evt.toolName === 'add_comment') {
+        const tid = field('Ticket', 'text', { value: a.ticketId, readonly: true });
+        const body = field('Comment', 'textarea', { value: a.body, required: true });
+        return {
+          heading: '⚠️ Confirm comment', verb: 'Add comment',
+          fields: [tid, body],
+          edits: () => ({ body: body.value() })
+        };
+      }
+      // Fallback for any other confirmation-required tool: show args read-only.
+      const pre = { row: document.createElement('pre'), value: () => '', required: false };
+      pre.row.textContent = JSON.stringify(a, null, 2);
+      return { heading: '⚠️ Confirm: ' + evt.toolName, verb: 'Confirm', fields: [pre], edits: () => ({}) };
+    }
+
     function renderConfirmation(evt) {
+      const spec = confirmationSpec(evt);
       const card = document.createElement('div');
       card.className = 'card';
-      const args = JSON.stringify(evt.arguments, null, 2);
-      card.innerHTML = '<h3>⚠️ Confirm: ' + evt.toolName + '</h3><pre></pre>' +
-        '<div class="actions"><button class="approve">Create ticket</button>' +
-        '<button class="decline">Cancel</button></div>';
-      card.querySelector('pre').textContent = args;
+
+      const h3 = document.createElement('h3');
+      h3.textContent = spec.heading;
+      const actions = document.createElement('div');
+      actions.className = 'actions';
+      const approveBtn = document.createElement('button');
+      approveBtn.className = 'approve';
+      approveBtn.textContent = spec.verb;
+      const declineBtn = document.createElement('button');
+      declineBtn.className = 'decline';
+      declineBtn.textContent = 'Cancel';
+      actions.append(approveBtn, declineBtn);
+
+      card.append(h3);
+      for (const f of spec.fields) card.append(f.row);
+      card.append(actions);
+
+      const validate = () => {
+        approveBtn.disabled = spec.fields.some(f => f.required && !f.value());
+      };
+      for (const f of spec.fields) if (f.el) f.el.addEventListener('input', validate);
+      validate();
+
       const decide = async (approved) => {
-        card.querySelector('.actions').remove();
-        add('tool', approved ? 'approved create_ticket' : 'declined create_ticket');
+        card.querySelectorAll('input, textarea, select, button').forEach(el => el.disabled = true);
+        actions.remove();
+        const payload = approved
+          ? { callId: evt.callId, approved: true, edits: spec.edits() }
+          : { callId: evt.callId, approved: false };
+        add('tool', (approved ? 'approved ' : 'declined ') + evt.toolName);
         lock(true);
         try {
           const res = await api('/api/conversations/' + conversationId + '/confirm', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ callId: evt.callId, approved })
+            body: JSON.stringify(payload)
           });
           await consume(res);
         } catch (e) { add('err', String(e)); }
         lock(false);
       };
-      card.querySelector('.approve').onclick = () => decide(true);
-      card.querySelector('.decline').onclick = () => decide(false);
+      approveBtn.onclick = () => decide(true);
+      declineBtn.onclick = () => decide(false);
       log.appendChild(card);
       log.scrollTop = log.scrollHeight;
     }

@@ -31,18 +31,40 @@ public sealed class OrchestrationLoop(IChatClient chatClient, IReadOnlyList<AIFu
         List<ChatMessage> messages,
         string callId,
         bool approved,
+        IReadOnlyDictionary<string, object?>? edits = null,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
-        object? result = "User declined to create this ticket.";
+        var call = messages
+            .SelectMany(m => m.Contents)
+            .OfType<FunctionCallContent>()
+            .Last(c => c.CallId == callId);
+
+        object? result;
 
         if (approved)
         {
-            var call = messages
-                .SelectMany(m => m.Contents)
-                .OfType<FunctionCallContent>()
-                .Last(c => c.CallId == callId);
+            // Start from what the model proposed, then apply any fields the user edited in
+            // the confirmation dialog so the action runs with the values they approved.
+            var arguments = new Dictionary<string, object?>(call.Arguments ?? new Dictionary<string, object?>());
+            if (edits is not null)
+            {
+                foreach (var (key, value) in edits)
+                {
+                    if (value is not null)
+                    {
+                        arguments[key] = value;
+                    }
+                }
+            }
 
-            result = await InvokeToolAsync(_toolsByName[TicketTools.CreateTicketToolName], call, ct);
+            // Overwrite the call's arguments in history too, so the model summarizes what it
+            // actually did (edited values), not the values it first proposed.
+            call.Arguments = arguments;
+            result = await InvokeToolAsync(_toolsByName[call.Name], call, ct);
+        }
+        else
+        {
+            result = $"User declined the {call.Name} action.";
         }
 
         messages.Add(new ChatMessage(ChatRole.Tool, [new FunctionResultContent(callId, result)]));
@@ -88,22 +110,26 @@ public sealed class OrchestrationLoop(IChatClient chatClient, IReadOnlyList<AIFu
 
             foreach (var call in calls)
             {
-                if (call.Name == TicketTools.CreateTicketToolName)
+                if (TicketTools.RequiresConfirmation(call.Name))
                 {
                     var arguments = call.Arguments ?? new Dictionary<string, object?>();
 
-                    // Guardrail: don't surface a confirmation card for a half-empty ticket.
-                    // Hand the model the list of missing fields so it asks the user instead.
-                    var missing = MissingCreateTicketFields(arguments);
-                    if (missing.Count > 0)
+                    // create-specific guardrail: don't surface a confirmation card for a
+                    // half-empty ticket — hand the model the missing fields so it asks first.
+                    if (call.Name == TicketTools.CreateTicketToolName)
                     {
-                        messages.Add(new ChatMessage(ChatRole.Tool, [new FunctionResultContent(
-                            call.CallId,
-                            $"Ticket not created — required fields still missing: {string.Join("; ", missing)}. " +
-                            "Ask the user to provide them; do not call create_ticket again until they have.")]));
-                        continue;
+                        var missing = MissingCreateTicketFields(arguments);
+                        if (missing.Count > 0)
+                        {
+                            messages.Add(new ChatMessage(ChatRole.Tool, [new FunctionResultContent(
+                                call.CallId,
+                                $"Ticket not created — required fields still missing: {string.Join("; ", missing)}. " +
+                                "Ask the user to provide them; do not call create_ticket again until they have.")]));
+                            continue;
+                        }
                     }
 
+                    // Every write tool pauses here for the user to approve (and optionally edit).
                     yield return new OrchestrationEvent.ConfirmationRequired(call.CallId, call.Name, arguments);
                     yield break;
                 }

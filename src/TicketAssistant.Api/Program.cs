@@ -126,7 +126,8 @@ app.MapPost("/api/conversations/{id:guid}/confirm", async (
 
     await WriteSseAsync(
         http.Response,
-        loop.ResumeAfterConfirmationAsync(messages, request.CallId, request.Approved, ct),
+        loop.ResumeAfterConfirmationAsync(
+            messages, request.CallId, request.Approved, request.Approved ? request.Edits : null, ct),
         ct);
 });
 
@@ -163,4 +164,7 @@ static async Task WriteSseAsync(
 
 internal sealed record ChatRequest(string Text);
 
-internal sealed record ConfirmRequest(string CallId, bool Approved);
+// Edits holds the (optionally user-modified) tool arguments keyed by parameter name —
+// e.g. { title, description, priority } for create_ticket, { status } for a status change.
+internal sealed record ConfirmRequest(
+    string CallId, bool Approved, Dictionary<string, object?>? Edits);

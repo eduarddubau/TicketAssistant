@@ -5,14 +5,23 @@ using TicketAssistant.Api.Providers;
 namespace TicketAssistant.Api.Orchestration;
 
 /// <summary>
-/// Exposes an ITicketProvider as AIFunctions the model can call. The tool named
-/// CreateTicketToolName is special-cased by OrchestrationLoop: it is described here
-/// like any other tool, but the loop intercepts it before invocation instead of
-/// running it automatically.
+/// Exposes an ITicketProvider as AIFunctions the model can call. The write tools listed
+/// in <see cref="RequiresConfirmation"/> are special-cased by OrchestrationLoop: they are
+/// described here like any other tool, but the loop intercepts them before invocation and
+/// asks the user to confirm (and optionally edit) instead of running them automatically.
+/// Read tools (get/search) run immediately.
 /// </summary>
 public static class TicketTools
 {
     public const string CreateTicketToolName = "create_ticket";
+    public const string UpdateStatusToolName = "update_ticket_status";
+    public const string AddCommentToolName = "add_comment";
+
+    private static readonly HashSet<string> ConfirmationRequiredTools =
+        new(StringComparer.Ordinal) { CreateTicketToolName, UpdateStatusToolName, AddCommentToolName };
+
+    /// <summary>Whether a tool mutates a ticket and so needs the user to confirm it first.</summary>
+    public static bool RequiresConfirmation(string toolName) => ConfirmationRequiredTools.Contains(toolName);
 
     public static IReadOnlyList<AIFunction> Build(ITicketProvider provider)
     {
@@ -50,14 +59,16 @@ public static class TicketTools
             AIFunctionFactory.Create(
                 (string ticketId, TicketStatus status, CancellationToken ct) =>
                     provider.UpdateTicketStatusAsync(ticketId, status, ct),
-                name: "update_ticket_status",
-                description: "Change an existing ticket's status."),
+                name: UpdateStatusToolName,
+                description: "Change an existing ticket's status. Never executed automatically — the " +
+                              "caller shows the user a confirmation card and gets explicit approval first."),
 
             AIFunctionFactory.Create(
                 (string ticketId, string body, CancellationToken ct) =>
                     provider.AddCommentAsync(ticketId, body, ct),
-                name: "add_comment",
-                description: "Add a comment to an existing ticket.")
+                name: AddCommentToolName,
+                description: "Add a comment to an existing ticket. Never executed automatically — the " +
+                              "caller shows the user a confirmation card and gets explicit approval first.")
         ];
     }
 }
