@@ -57,6 +57,8 @@
     #send { padding: .6rem 1.1rem; border-radius: 8px; border: none; background: #2563eb; color: #fff; font-weight: 600; cursor: pointer; }
     #send:disabled { opacity: .5; cursor: default; }
     .user-box { display: flex; align-items: center; gap: .35rem; font-size: .8rem; opacity: .85; }
+    #provider, #model { padding: .3rem .5rem; border-radius: 6px; border: 1px solid color-mix(in srgb, CanvasText 25%, transparent); background: Canvas; color: inherit; font: inherit; font-size: .8rem; }
+    #model { width: 9rem; }
     #user { width: 8rem; padding: .3rem .5rem; border-radius: 6px; border: 1px solid color-mix(in srgb, CanvasText 25%, transparent); background: Canvas; color: inherit; font: inherit; font-size: .8rem; }
   </style>
 </head>
@@ -65,6 +67,8 @@
     <h1>TicketAssistant</h1>
     <span class="cid" id="cid">no conversation</span>
     <label class="user-box">👤 user <input id="user" title="You only see tickets created by this user. Change it to test isolation." /></label>
+    <label class="user-box">🧠 <select id="provider" title="Which LLM answers. Switching lets you compare how reliably each one calls tools."></select></label>
+    <label class="user-box"><input id="model" title="Model id for the selected provider." /></label>
     <button id="reset" type="button">New conversation</button>
   </header>
 
@@ -82,6 +86,8 @@
     const send = document.getElementById('send');
     const cidLabel = document.getElementById('cid');
     const userInput = document.getElementById('user');
+    const providerSelect = document.getElementById('provider');
+    const modelInput = document.getElementById('model');
     let conversationId = null;
     let TICKET_BOARD = 'http://localhost:5090';   // replaced by the server's value on connect
 
@@ -90,10 +96,53 @@
     let userId = localStorage.getItem('ta-user') || 'alice';
     userInput.value = userId;
 
-    // fetch wrapper that tags every request with the current user.
+    // Chosen LLM. Sent per request, so switching takes effect on the next message without a
+    // restart; blank means "whatever the server is configured to use".
+    let llmProvider = localStorage.getItem('ta-provider') || '';
+    let llmModel = localStorage.getItem('ta-model') || '';
+    let defaultModels = {};
+
+    // fetch wrapper that tags every request with the current user and chosen model.
     function api(url, options = {}) {
-      return fetch(url, { ...options, headers: { ...(options.headers || {}), 'X-User-Id': userId } });
+      const headers = { ...(options.headers || {}), 'X-User-Id': userId };
+      if (llmProvider) headers['X-Llm-Provider'] = llmProvider;
+      if (llmModel) headers['X-Llm-Model'] = llmModel;
+      return fetch(url, { ...options, headers });
     }
+
+    // Populate the switcher from the server's list, defaulting to whatever it currently uses.
+    async function loadProviders() {
+      try {
+        const info = await (await api('/api/llm')).json();
+        defaultModels = info.defaultModels || {};
+        providerSelect.innerHTML = '';
+        for (const p of info.providers) {
+          const opt = document.createElement('option');
+          opt.value = p; opt.textContent = p;
+          providerSelect.append(opt);
+        }
+        llmProvider = llmProvider || info.provider;
+        llmModel = llmModel || info.model;
+        providerSelect.value = llmProvider;
+        modelInput.value = llmModel;
+      } catch { /* switcher is optional — the server default still applies */ }
+    }
+
+    // Switching provider swaps in that provider's default model unless one was typed.
+    providerSelect.addEventListener('change', () => {
+      llmProvider = providerSelect.value;
+      llmModel = defaultModels[llmProvider] || '';
+      modelInput.value = llmModel;
+      localStorage.setItem('ta-provider', llmProvider);
+      localStorage.setItem('ta-model', llmModel);
+      add('tool', 'now using ' + llmProvider + (llmModel ? ' · ' + llmModel : ''));
+    });
+
+    modelInput.addEventListener('change', () => {
+      llmModel = modelInput.value.trim();
+      localStorage.setItem('ta-model', llmModel);
+      add('tool', 'now using ' + llmProvider + (llmModel ? ' · ' + llmModel : ''));
+    });
 
     function add(cls, text) {
       const el = document.createElement('div');
@@ -373,7 +422,7 @@
     userInput.addEventListener('change', switchUser);
 
     document.getElementById('reset').onclick = newConversation;
-    newConversation();
+    loadProviders().then(newConversation);
   </script>
 </body>
 </html>

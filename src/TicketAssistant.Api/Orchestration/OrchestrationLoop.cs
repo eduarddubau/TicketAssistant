@@ -17,13 +17,13 @@ namespace TicketAssistant.Api.Orchestration;
 /// (create/update/comment) are never run automatically — the loop stops and raises a
 /// ConfirmationRequired event so the caller can show a confirmation card first.
 /// </summary>
-/// <param name="chatClient">The LLM (any provider) behind Microsoft.Extensions.AI's interface.</param>
+/// <param name="chatClients">Supplies the LLM for this request (provider/model can be overridden per call).</param>
 /// <param name="tools">The AIFunctions the model may call, built by <see cref="TicketTools.Build"/>.</param>
 /// <param name="provider">The ticket backend, used directly for the duplicate-detection lookup.</param>
 /// <param name="logger">Traces what the model asked for and which guardrails fired — the main
 /// way to see why a turn behaved the way it did without reproducing it live.</param>
 public sealed class OrchestrationLoop(
-    IChatClient chatClient,
+    ChatClientFactory chatClients,
     IReadOnlyList<AIFunction> tools,
     ITicketProvider provider,
     UndoStore undo,
@@ -123,7 +123,9 @@ public sealed class OrchestrationLoop(
         List<ChatMessage> messages,
         [EnumeratorCancellation] CancellationToken ct)
     {
-        // Tell the model which tools it may call this turn.
+        // Tell the model which tools it may call this turn. The client is resolved per run so
+        // the caller can switch provider/model between requests.
+        var chatClient = chatClients.Resolve();
         var options = new ChatOptions { Tools = [.. tools] };
 
         // Bounds runaway tool loops (e.g. a weak model repeatedly calling create_ticket

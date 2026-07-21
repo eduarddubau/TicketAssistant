@@ -3,12 +3,8 @@
 //      backend, and the orchestration pieces.
 //   2. The HTTP pipeline — middleware and the three chat endpoints.
 // .NET "top-level statements": the code below runs directly, no Main method needed.
-using System.ClientModel;
 using System.Text.Json;
-using Anthropic;
 using Microsoft.Extensions.AI;
-using OllamaSharp;
-using OpenAI;
 using Scalar.AspNetCore;
 using TicketAssistant.Api.Orchestration;
 using TicketAssistant.Api.Providers;
@@ -40,49 +36,11 @@ else
         .AddHttpMessageHandler<UserIdForwardingHandler>();
 }
 
-// Llm:Provider selects the chat backend behind the single IChatClient abstraction:
-// "Ollama" (default, local, no key), "Anthropic", "OpenAI", or "Google". Google is reached
-// through its OpenAI-compatible endpoint, so it reuses the OpenAI client. Deliberately not
-// .UseFunctionInvocation() — OrchestrationLoop drives the tool-call loop by hand so it can
-// intercept create_ticket before it runs.
-builder.Services.AddSingleton<IChatClient>(sp =>
-{
-    var cfg = sp.GetRequiredService<IConfiguration>();
-    var provider = (cfg["Llm:Provider"] ?? "Ollama").ToLowerInvariant();
-
-    static string RequireKey(IConfiguration cfg, string key) =>
-        cfg[key] ?? throw new InvalidOperationException($"{key} is required for the selected Llm:Provider.");
-
-    switch (provider)
-    {
-        case "anthropic":
-        {
-            var apiKey = cfg["Anthropic:ApiKey"];
-            var client = string.IsNullOrEmpty(apiKey) ? new AnthropicClient() : new AnthropicClient { ApiKey = apiKey };
-            return client.AsIChatClient(cfg["Anthropic:Model"] ?? "claude-sonnet-5");
-        }
-        case "openai":
-        {
-            return new OpenAIClient(new ApiKeyCredential(RequireKey(cfg, "OpenAI:ApiKey")))
-                .GetChatClient(cfg["OpenAI:Model"] ?? "gpt-4o-mini")
-                .AsIChatClient();
-        }
-        case "google":
-        {
-            var endpoint = cfg["Google:BaseUrl"] ?? "https://generativelanguage.googleapis.com/v1beta/openai/";
-            return new OpenAIClient(
-                    new ApiKeyCredential(RequireKey(cfg, "Google:ApiKey")),
-                    new OpenAIClientOptions { Endpoint = new Uri(endpoint) })
-                .GetChatClient(cfg["Google:Model"] ?? "gemini-2.0-flash")
-                .AsIChatClient();
-        }
-        default:
-        {
-            var baseUrl = cfg["Ollama:BaseUrl"] ?? "http://localhost:11434";
-            return new OllamaApiClient(new Uri(baseUrl), cfg["Ollama:Model"] ?? "llama3.2:3b");
-        }
-    }
-});
+// The chat client is created per request by ChatClientFactory, so the provider/model can be
+// switched with the X-Llm-Provider / X-Llm-Model headers instead of only via configuration.
+// Deliberately no .UseFunctionInvocation() — OrchestrationLoop drives the tool-call loop by
+// hand so it can intercept writes before they run.
+builder.Services.AddSingleton<ChatClientFactory>();
 
 // Build the tool menu from whichever provider was registered above, then the loop (which
 // takes the chat client + tools + provider) and the conversation memory. All singletons:
@@ -117,6 +75,20 @@ var boardUrl = builder.Configuration["Tickets:BoardUrl"] ?? "http://localhost:50
 // can turn ticket ids in replies into links.
 app.MapPost("/api/conversations", (ConversationStore store) =>
     Results.Ok(new { conversationId = store.Create(), greeting = ConversationStore.Greeting, boardUrl }));
+
+// Which LLM providers exist and which one this request would use, so the console can offer a
+// switcher. Callers override per request with the X-Llm-Provider / X-Llm-Model headers.
+app.MapGet("/api/llm", (ChatClientFactory chatClients) =>
+{
+    var (provider, model) = chatClients.Current();
+    return Results.Ok(new
+    {
+        providers = ChatClientFactory.KnownProviders,
+        defaultModels = ChatClientFactory.KnownProviders.ToDictionary(p => p, chatClients.DefaultModelFor),
+        provider,
+        model
+    });
+});
 
 // Send a user message. Appends it to the conversation, runs the loop, and streams the
 // resulting events (assistant text / tools ran / a confirmation request) back as SSE.
