@@ -1,0 +1,26 @@
+services:
+  api:
+    build:
+      context: ./src/TicketAssistant.Api
+    ports:
+      - "5080:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      # User secrets on the host aren't visible inside the container, so the Anthropic
+      # key has to come in as a real env var here when Llm__Provider=Anthropic.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      Llm__Provider: ${LLM_PROVIDER:-Ollama}
+      Ollama__BaseUrl: http://ollama:11434
+      Ollama__Model: ${OLLAMA_MODEL:-llama3.2:3b}
+    depends_on:
+      - ollama
+
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+
+volumes:
+  ollama-data:
