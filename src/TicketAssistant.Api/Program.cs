@@ -48,6 +48,11 @@ var app = builder.Build();
 
 app.UseCors(AngularDevCorsPolicy);
 
+// Serves wwwroot/index.html at "/" — a minimal SSE chat client for testing the API
+// in a browser without standing up the Angular app. Same-origin, so no CORS involved.
+app.UseDefaultFiles();
+app.UseStaticFiles();
+
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
