@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.AI;
@@ -132,6 +133,11 @@ public sealed class OrchestrationLoop(
         // with empty fields even after being told what's missing).
         const int maxTurns = 8;
 
+        // A weak model sometimes writes a tool call as plain text instead of calling it; we
+        // retry once on that, then apologise rather than loop forever.
+        const int maxBotchedAttempts = 2;
+        var botchedAttempts = 0;
+
         for (var turn = 0; ; turn++)
         {
             if (turn >= maxTurns)
@@ -147,21 +153,43 @@ public sealed class OrchestrationLoop(
             // reply is ready; the fragments are then reassembled into one response for history.
             var stopwatch = Stopwatch.StartNew();
             var updates = new List<ChatResponseUpdate>();
-            var streamedText = false;
+
+            // Buffer the reply's opening text before streaming it: a weak model sometimes writes
+            // a tool call as plain text (e.g. {"name":"create_ticket",...}) instead of calling
+            // the tool. We don't want that raw blob shown, so we hold the first few characters,
+            // decide whether it's genuine prose, and only then start streaming to the user.
+            var buffer = new StringBuilder();
+            var streaming = false;     // committed to streaming this reply as prose
+            var streamedText = false;  // actually streamed at least one delta
 
             await foreach (var update in chatClient.GetStreamingResponseAsync(messages, options, ct))
             {
                 updates.Add(update);
-                if (!string.IsNullOrEmpty(update.Text))
+                if (string.IsNullOrEmpty(update.Text))
+                {
+                    continue;
+                }
+
+                if (streaming)
                 {
                     streamedText = true;
                     yield return new OrchestrationEvent.AssistantTextDelta(update.Text);
+                    continue;
+                }
+
+                buffer.Append(update.Text);
+                // Once there's enough to judge, stream it — unless it looks like a tool-call
+                // blob, which we keep buffered and deal with after the stream ends.
+                if (buffer.Length >= 24 && !LooksLikeToolCallText(buffer.ToString()))
+                {
+                    streaming = true;
+                    streamedText = true;
+                    yield return new OrchestrationEvent.AssistantTextDelta(buffer.ToString());
                 }
             }
 
             stopwatch.Stop();
             var response = updates.ToChatResponse();
-            messages.AddMessages(response); // remember its reply (text and/or tool calls)
 
             // 2. Did it ask to call any tools? Pull those out of the reply.
             var calls = response.Messages
@@ -172,6 +200,39 @@ public sealed class OrchestrationLoop(
             logger.LogInformation(
                 "Turn {Turn}: model replied in {ElapsedMs}ms with {ToolCallCount} tool call(s) [{Tools}]",
                 turn, stopwatch.ElapsedMilliseconds, calls.Count, string.Join(", ", calls.Select(c => c.Name)));
+
+            // A short genuine reply may have ended before reaching the streaming threshold — flush it.
+            if (!streaming && !streamedText && calls.Count == 0 && buffer.Length > 0
+                && !LooksLikeToolCallText(response.Text))
+            {
+                streamedText = true;
+                yield return new OrchestrationEvent.AssistantTextDelta(buffer.ToString());
+            }
+
+            // Malformed tool call: the model wrote a tool call as text instead of calling it. It
+            // was never streamed, so nudge it to try again; if it keeps failing, apologise rather
+            // than surface the blob. The botched reply is left out of history to avoid modelling it.
+            if (calls.Count == 0 && !streamedText && LooksLikeToolCallText(response.Text))
+            {
+                botchedAttempts++;
+                logger.LogWarning("Model wrote a malformed tool call as text (attempt {Attempt}): {Preview}",
+                    botchedAttempts, Truncate(response.Text, 120));
+
+                if (botchedAttempts >= maxBotchedAttempts)
+                {
+                    yield return new OrchestrationEvent.AssistantText(
+                        "Sorry — I had trouble with that. Could you rephrase or give me a bit more detail?");
+                    yield break;
+                }
+
+                messages.Add(new ChatMessage(ChatRole.User,
+                    "Your previous reply was a malformed tool call and was not shown to me. If you need " +
+                    "to perform an action, call the tool properly; otherwise just reply in plain language " +
+                    "or ask me for any details you need."));
+                continue;
+            }
+
+            messages.AddMessages(response); // remember its reply (text and/or tool calls)
 
             // 3. No tool calls => it's a plain answer for the user. We're done this turn.
             // If the reply already went out as deltas the UI has it; only send the whole text
@@ -416,6 +477,34 @@ public sealed class OrchestrationLoop(
 
         return missing;
     }
+
+    /// <summary>
+    /// Heuristic for text that is really a botched tool call — the model printing a JSON call
+    /// (e.g. {"name":"create_ticket","parameters":{…}}) instead of invoking the tool. We look
+    /// for a leading brace plus a "name" key and either a parameters/arguments key or one of our
+    /// tool names. Kept strict (must start with '{') so normal prose is never mistaken for one.
+    /// </summary>
+    private bool LooksLikeToolCallText(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return false;
+        }
+
+        var trimmed = text.TrimStart();
+        if (trimmed.Length == 0 || trimmed[0] != '{'
+            || !trimmed.Contains("\"name\"", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return trimmed.Contains("\"parameters\"", StringComparison.OrdinalIgnoreCase)
+            || trimmed.Contains("\"arguments\"", StringComparison.OrdinalIgnoreCase)
+            || _toolsByName.Keys.Any(name => trimmed.Contains(name, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string Truncate(string text, int max) =>
+        text.Length <= max ? text : text[..max] + "…";
 
     // The model's tool arguments arrive as a loosely-typed name -> value bag (values are
     // usually JsonElements). These two helpers safely pull one argument out as a string or a
