@@ -154,8 +154,13 @@ One-time host setup for GPU use — **Linux** (Fedora shown; see the [NVIDIA con
 for other distros):
 
 ```bash
-# 1. NVIDIA driver — `nvidia-smi` must print your GPU
-# 2. the container toolkit
+# 1. NVIDIA driver + CUDA userspace tools — afterwards `nvidia-smi` must print your GPU.
+#    (On Fedora these come from RPM Fusion; the driver may already be installed.)
+sudo dnf install akmod-nvidia xorg-x11-drv-nvidia-cuda
+
+# 2. the container toolkit, from NVIDIA's own repo
+curl -s -L https://nvidia.github.io/libnvidia-container/stable/rpm/nvidia-container-toolkit.repo \
+  | sudo tee /etc/yum.repos.d/nvidia-container-toolkit.repo
 sudo dnf install nvidia-container-toolkit
 
 # 3. generate the CDI spec that lets podman see the GPU
@@ -164,6 +169,9 @@ sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml
 # sanity check — should print your GPU from inside a container
 podman run --rm --device nvidia.com/gpu=all ubuntu nvidia-smi
 ```
+
+If the driver was freshly installed in step 1 (rather than already present), reboot once
+before continuing so the kernel modules load.
 
 **Windows** — the normal NVIDIA driver on Windows is step 1 (WSL2 automatically projects it
 into every Linux VM). Unlike Docker Desktop, which bundles the container-runtime GPU glue,
