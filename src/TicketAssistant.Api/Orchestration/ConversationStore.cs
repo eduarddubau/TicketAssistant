@@ -68,26 +68,15 @@ public sealed class ConversationStore
     /// </summary>
     public const string Greeting =
         """
-        👋 Hi! I'm your automated ticketing assistant.
+        👋 Hi! I'm your ticketing assistant.
 
-        Here's what I can do for you:
-        • Look up and search your tickets, or list them by status or priority
-        • Give you a summary of where everything stands, including anything overdue
-        • Open a new ticket
-        • Resolve a ticket with a note, or change its status — for example reopen it
-        • Add a comment, assign it to someone, or set a due date
+        Tell me about a problem and I'll open a ticket for it — or ask me how your existing
+        tickets are doing, and I can update, resolve, or comment on them for you.
 
-        A few things worth knowing:
-        • I'll always show you a summary and ask before I change anything — and you can edit
-          the details before approving
-        • Changed your mind? Just say "undo that" and I'll reverse my last change
-        • If I'm missing something (title, description, severity), I'll ask you for it
-        • If you already have a ticket for the same issue, I'll offer to reopen or update it
-          instead of creating a duplicate
-        • You only ever see the tickets you created
+        Don't worry about getting anything wrong: I'll always check with you before changing
+        anything, and you can just say "undo that" if you change your mind.
 
-        How can I help you today? Just describe the issue in your own words — for example:
-        "the login page returns a 500 error when I submit".
+        So — what can I help you with today?
         """;
 
     // Thread-safe map of conversation id -> its list of messages (system, user, assistant,
