@@ -61,7 +61,8 @@
     #send { padding: .6rem 1.1rem; border-radius: 8px; border: none; background: #2563eb; color: #fff; font-weight: 600; cursor: pointer; }
     #send:disabled { opacity: .5; cursor: default; }
     .user-box { display: flex; align-items: center; gap: .35rem; font-size: .8rem; opacity: .85; }
-    #provider, #model, #compute { padding: .3rem .5rem; border-radius: 6px; border: 1px solid color-mix(in srgb, CanvasText 25%, transparent); background: Canvas; color: inherit; font: inherit; font-size: .8rem; }
+    #provider, #model, #modelSelect, #compute { padding: .3rem .5rem; border-radius: 6px; border: 1px solid color-mix(in srgb, CanvasText 25%, transparent); background: Canvas; color: inherit; font: inherit; font-size: .8rem; }
+    #computeStatus { font-size: .75rem; opacity: .7; white-space: nowrap; }
     #model { width: 9rem; }
     #user { width: 8rem; padding: .3rem .5rem; border-radius: 6px; border: 1px solid color-mix(in srgb, CanvasText 25%, transparent); background: Canvas; color: inherit; font: inherit; font-size: .8rem; }
   </style>
@@ -72,11 +73,11 @@
     <span class="cid" id="cid">no conversation</span>
     <label class="user-box">👤 user <input id="user" title="You only see tickets created by this user. Change it to test isolation." /></label>
     <label class="user-box">🧠 <select id="provider" title="Which LLM answers. Switching lets you compare how reliably each one calls tools."></select></label>
-    <label class="user-box"><input id="model" title="Model id for the selected provider." /></label>
+    <label class="user-box"><input id="model" title="Model id for the selected provider." /><select id="modelSelect" title="Installed Ollama models — switching takes effect on the next message." style="display:none"></select></label>
     <label class="user-box" id="computeBox">⚙️ <select id="compute" title="Ollama only: GPU uses the graphics card when the container has one (falling back to CPU when it doesn't); CPU forces CPU-only inference. Takes effect on the next message.">
       <option value="">GPU (auto)</option>
       <option value="cpu">CPU only</option>
-    </select></label>
+    </select> <span id="computeStatus" title="What Ollama is actually running on right now."></span></label>
     <button id="reset" type="button">New conversation</button>
   </header>
 
@@ -114,12 +115,15 @@
     // selector is hidden for hosted providers, where compute isn't ours to pick.
     const computeSelect = document.getElementById('compute');
     const computeBox = document.getElementById('computeBox');
+    const computeStatus = document.getElementById('computeStatus');
+    const modelSelect = document.getElementById('modelSelect');
     let llmCompute = localStorage.getItem('ta-compute') || '';
     computeSelect.value = llmCompute;
 
+    function isOllama() { return (llmProvider || 'Ollama').toLowerCase() === 'ollama'; }
+
     function updateComputeVisibility() {
-      computeBox.style.display =
-        (llmProvider || 'Ollama').toLowerCase() === 'ollama' ? '' : 'none';
+      computeBox.style.display = isOllama() ? '' : 'none';
     }
     updateComputeVisibility();
 
@@ -128,6 +132,58 @@
       localStorage.setItem('ta-compute', llmCompute);
       add('tool', 'Ollama compute: ' + (llmCompute === 'cpu' ? 'CPU only' : 'GPU (auto)'));
     });
+
+    // For Ollama the model field becomes a dropdown of what's actually installed (fast
+    // switching, no typos); hosted providers keep the free-text field. Falls back to the
+    // text field if the model list can't be fetched.
+    async function updateModelPicker() {
+      if (isOllama()) {
+        try {
+          const models = await (await api('/api/llm/ollama/models')).json();
+          if (models.length) {
+            modelSelect.innerHTML = '';
+            for (const m of models) {
+              const opt = document.createElement('option');
+              opt.value = m; opt.textContent = m;
+              modelSelect.append(opt);
+            }
+            // Keep the current choice if it's installed; otherwise fall back to the first.
+            if (!models.includes(llmModel)) {
+              llmModel = models.includes(defaultModels['Ollama']) ? defaultModels['Ollama'] : models[0];
+              localStorage.setItem('ta-model', llmModel);
+            }
+            modelSelect.value = llmModel;
+            modelSelect.style.display = '';
+            modelInput.style.display = 'none';
+            return;
+          }
+        } catch { /* fall through to the text field */ }
+      }
+      modelSelect.style.display = 'none';
+      modelInput.style.display = '';
+    }
+
+    modelSelect.addEventListener('change', () => {
+      llmModel = modelSelect.value;
+      localStorage.setItem('ta-model', llmModel);
+      add('tool', 'now using ' + llmProvider + ' · ' + llmModel);
+    });
+
+    // The selector above is the *request*; this badge shows the *reality* — what Ollama
+    // reports it's actually running the loaded model on (its /api/ps, via the backend).
+    async function refreshComputeStatus() {
+      if (!isOllama()) { computeStatus.textContent = ''; return; }
+      try {
+        const s = await (await api('/api/llm/ollama/status')).json();
+        computeStatus.textContent = s.loaded ? '· on ' + s.processor : '· idle';
+        computeStatus.title = s.loaded
+          ? s.model + ' is running on ' + s.processor
+          : 'No model loaded right now (Ollama unloads idle models after a few minutes).';
+      } catch {
+        computeStatus.textContent = '';
+      }
+    }
+    refreshComputeStatus();
 
     // fetch wrapper that tags every request with the current user and chosen model.
     function api(url, options = {}) {
@@ -154,17 +210,21 @@
         providerSelect.value = llmProvider;
         modelInput.value = llmModel;
         updateComputeVisibility();
+        await updateModelPicker();
+        refreshComputeStatus();
       } catch { /* switcher is optional — the server default still applies */ }
     }
 
     // Switching provider swaps in that provider's default model unless one was typed.
-    providerSelect.addEventListener('change', () => {
+    providerSelect.addEventListener('change', async () => {
       llmProvider = providerSelect.value;
       llmModel = defaultModels[llmProvider] || '';
       modelInput.value = llmModel;
       localStorage.setItem('ta-provider', llmProvider);
       localStorage.setItem('ta-model', llmModel);
       updateComputeVisibility();
+      await updateModelPicker();
+      refreshComputeStatus();
       add('tool', 'now using ' + llmProvider + (llmModel ? ' · ' + llmModel : ''));
     });
 
@@ -264,6 +324,8 @@
       }
       // Stream finished; render a message still open at the end.
       if (streamingBubble) { renderRich(streamingBubble); streamingBubble = null; }
+      // The model just ran, so the GPU/CPU reality may have changed — refresh the badge.
+      refreshComputeStatus();
     }
 
     // The bubble currently being streamed into, so consecutive deltas append to one message.

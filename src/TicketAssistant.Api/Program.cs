@@ -90,6 +90,65 @@ app.MapGet("/api/llm", (ChatClientFactory chatClients) =>
     });
 });
 
+// The models installed in the local Ollama instance, for the console's model dropdown.
+// Empty list when Ollama isn't reachable — the console falls back to a free-text field.
+app.MapGet("/api/llm/ollama/models", async (IConfiguration config, CancellationToken ct) =>
+{
+    try
+    {
+        using var http = new HttpClient
+        {
+            BaseAddress = new Uri(config["Ollama:BaseUrl"] ?? "http://localhost:11434"),
+            Timeout = TimeSpan.FromSeconds(5)
+        };
+        var tags = await http.GetFromJsonAsync<JsonElement>("/api/tags", ct);
+        var names = tags.GetProperty("models").EnumerateArray()
+            .Select(m => m.GetProperty("name").GetString())
+            .Where(n => !string.IsNullOrEmpty(n))
+            .OrderBy(n => n)
+            .ToArray();
+        return Results.Ok(names);
+    }
+    catch
+    {
+        return Results.Ok(Array.Empty<string>());
+    }
+});
+
+// What the local Ollama is actually running on right now (reads its /api/ps): GPU, CPU, or
+// a split when the model doesn't fully fit in VRAM. Powers the status badge next to the
+// console's GPU/CPU selector — the selector is the request, this is the reality.
+app.MapGet("/api/llm/ollama/status", async (IConfiguration config, CancellationToken ct) =>
+{
+    try
+    {
+        using var http = new HttpClient
+        {
+            BaseAddress = new Uri(config["Ollama:BaseUrl"] ?? "http://localhost:11434"),
+            Timeout = TimeSpan.FromSeconds(5)
+        };
+        var ps = await http.GetFromJsonAsync<JsonElement>("/api/ps", ct);
+        var loaded = ps.GetProperty("models").EnumerateArray().FirstOrDefault();
+        if (loaded.ValueKind != JsonValueKind.Object)
+        {
+            // Nothing in memory — Ollama unloads idle models after a few minutes.
+            return Results.Ok(new { loaded = false, model = (string?)null, processor = (string?)null });
+        }
+
+        var name = loaded.GetProperty("name").GetString();
+        var size = loaded.TryGetProperty("size", out var s) ? s.GetInt64() : 0;
+        var sizeVram = loaded.TryGetProperty("size_vram", out var v) ? v.GetInt64() : 0;
+        var processor = sizeVram <= 0 ? "CPU"
+            : sizeVram >= size ? "GPU"
+            : $"{(int)(sizeVram * 100.0 / size)}% GPU / CPU";
+        return Results.Ok(new { loaded = true, model = name, processor });
+    }
+    catch
+    {
+        return Results.Ok(new { loaded = false, model = (string?)null, processor = (string?)null });
+    }
+});
+
 // Send a user message. Appends it to the conversation, runs the loop, and streams the
 // resulting events (assistant text / tools ran / a confirmation request) back as SSE.
 app.MapPost("/api/conversations/{id:guid}/messages", async (

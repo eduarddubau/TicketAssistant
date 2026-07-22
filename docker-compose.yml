@@ -35,9 +35,10 @@ services:
     devices:
       - ${OLLAMA_GPU_DEVICE:-/dev/null}
 
-  # One-shot helper: pulls the chat model into the ollama service on startup, so a fresh
-  # clone works without a manual `ollama pull`. Idempotent — when the model is already
-  # there it just verifies and exits. Watch first-run download progress with:
+  # One-shot helper: pulls the chat models into the ollama service on startup, so a fresh
+  # clone works without a manual `ollama pull`. Pulls the default model plus any extras
+  # (space-separated) so the console's model dropdown has real choices. Idempotent — models
+  # already present are just verified. Watch first-run download progress with:
   #   podman compose logs -f ollama-pull
   ollama-pull:
     image: ollama/ollama:latest
@@ -46,16 +47,19 @@ services:
     environment:
       # The ollama CLI talks to the server container instead of starting its own.
       OLLAMA_HOST: http://ollama:11434
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.2:3b}
+      OLLAMA_PULL_MODELS: ${OLLAMA_MODEL:-llama3.2:3b} ${OLLAMA_EXTRA_MODELS:-qwen2.5:3b}
     restart: "no"
-    # $$ so variables are resolved by the shell at runtime, not by compose. The pull is
+    # $$ so variables are resolved by the shell at runtime, not by compose. Each pull is
     # retried on failure (ollama resumes partial downloads, so retries are cheap) — a
-    # network blip shouldn't leave a fresh install without its model.
+    # network blip shouldn't leave a fresh install without its models.
     entrypoint: ["/bin/sh", "-c", "until ollama list >/dev/null 2>&1; do sleep 1; done;
-      n=0; until ollama pull \"$$OLLAMA_MODEL\"; do
-        n=$$((n+1));
-        if [ $$n -ge 10 ]; then echo 'Giving up after 10 attempts.'; exit 1; fi;
-        echo \"Model pull failed (attempt $$n/10) - retrying in 10s...\"; sleep 10;
+      for m in $$OLLAMA_PULL_MODELS; do
+        echo \"--- pulling $$m ---\";
+        n=0; until ollama pull \"$$m\"; do
+          n=$$((n+1));
+          if [ $$n -ge 10 ]; then echo \"Giving up on $$m after 10 attempts.\"; exit 1; fi;
+          echo \"Pull of $$m failed (attempt $$n/10) - retrying in 10s...\"; sleep 10;
+        done;
       done"]
 
   # Stands in for a real external ticketing system (Jira/Zendesk/...) so created tickets

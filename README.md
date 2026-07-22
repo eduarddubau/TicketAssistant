@@ -106,9 +106,10 @@ see what's happening:
 2. **Ollama image download** (cached after the first run)
 3. **Build** of the two services
 4. **Container start**
-5. **Chat model download** — `llama3.2:3b`, a couple of GB on the first run, streamed to
-   your terminal; instant on later runs. Changing `OLLAMA_MODEL` in `.env` and re-running
-   pulls the new model too.
+5. **Chat model download** — `llama3.2:3b` (the default) plus `qwen2.5:3b` (an alternative
+   with steadier tool calling, for A/B-ing from the console's model dropdown); a few GB on
+   the first run, streamed to your terminal, instant after. Change `OLLAMA_MODEL` /
+   `OLLAMA_EXTRA_MODELS` in `.env` and re-run to pull different ones.
 
 Every download is retried automatically on failure or stall, so a network blip doesn't
 mean debugging — worst case the script fails loudly after several attempts. It ends with
@@ -136,8 +137,12 @@ The console header has four switchers, all taking effect on the next message:
 - **user** — who you are; the API scopes tickets to this user. It defaults to `alice`, who
   owns the seed tickets — change it to test isolation.
 - **provider** and **model** — which LLM answers. Ollama needs no key; the hosted providers
-  use the API keys from `.env`.
-- **⚙️ GPU/CPU** (Ollama only) — where inference runs, when the container has a GPU.
+  use the API keys from `.env`. For Ollama the model field is a **dropdown of the models
+  actually installed** (fast switching, no typos); hosted providers get a free-text field.
+- **⚙️ GPU/CPU** (Ollama only) — where inference *should* run, when the container has a
+  GPU. Next to it, a small status badge shows where the loaded model is *actually* running
+  right now (e.g. `· on GPU`, `· on CPU`, or a split when it doesn't fully fit in VRAM),
+  straight from Ollama's own report.
 
 ### GPU acceleration for Ollama (optional)
 
@@ -228,7 +233,8 @@ Set via `appsettings.json`, environment variables, or `.env` (see `.env.example`
 | Setting | Purpose | Default |
 | --- | --- | --- |
 | `Llm:Provider` | `Ollama` \| `Anthropic` \| `OpenAI` \| `Google` | `Ollama` |
-| `Ollama:Model` | Local model (needs tool-calling support) | `llama3.2:3b` |
+| `Ollama:Model` | Default local model (needs tool-calling support) | `llama3.2:3b` |
+| `OLLAMA_EXTRA_MODELS` (.env, compose only) | Extra models to auto-download for the console's dropdown (space-separated) | `qwen2.5:3b` |
 | `Anthropic/OpenAI/Google :ApiKey` | Key for the chosen hosted provider | — |
 | `Anthropic/OpenAI/Google :Model` | Model for that provider | `claude-sonnet-5` / `gpt-4o-mini` / `gemini-flash-latest` |
 | `Tickets:Backend` | `Http` (the mock) \| `InMemory` (offline stub) | `Http` |
