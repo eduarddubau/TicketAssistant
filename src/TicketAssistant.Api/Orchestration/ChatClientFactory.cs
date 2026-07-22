@@ -1,5 +1,4 @@
 using System.ClientModel;
-using System.ClientModel.Primitives;
 using System.Collections.Concurrent;
 using Anthropic;
 using Microsoft.Extensions.AI;
@@ -57,7 +56,6 @@ public sealed class ChatClientFactory(IConfiguration configuration, IHttpContext
     private string RequireKey(string key) =>
         configuration[key] ?? throw new InvalidOperationException($"{key} is required for the selected LLM provider.");
 
-    // Google is reached through its OpenAI-compatible endpoint, so it reuses the OpenAI client.
     private IChatClient Build(string provider, string model) => provider.ToLowerInvariant() switch
     {
         "anthropic" => (configuration["Anthropic:ApiKey"] is { Length: > 0 } key
@@ -68,19 +66,9 @@ public sealed class ChatClientFactory(IConfiguration configuration, IHttpContext
             .GetChatClient(model)
             .AsIChatClient(),
 
-        // Gemini needs its proprietary tool-call "thought signature" echoed back, which the
-        // OpenAI SDK drops — GeminiToolCallSignatureHandler patches it in at the wire level.
-        "google" => new OpenAIClient(
-                new ApiKeyCredential(RequireKey("Google:ApiKey")),
-                new OpenAIClientOptions
-                {
-                    Endpoint = new Uri(configuration["Google:BaseUrl"]
-                                       ?? "https://generativelanguage.googleapis.com/v1beta/openai/"),
-                    Transport = new HttpClientPipelineTransport(
-                        new HttpClient(new GeminiToolCallSignatureHandler(new SocketsHttpHandler())))
-                })
-            .GetChatClient(model)
-            .AsIChatClient(),
+        // Google's own SDK speaks the native Gemini protocol, so provider-specific details
+        // like tool-call thought signatures are its problem rather than ours.
+        "google" => new Google.GenAI.Client(apiKey: RequireKey("Google:ApiKey")).AsIChatClient(model),
 
         _ => new OllamaApiClient(new Uri(configuration["Ollama:BaseUrl"] ?? "http://localhost:11434"), model)
     };
