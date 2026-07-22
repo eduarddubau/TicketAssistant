@@ -251,6 +251,19 @@
         return;
       }
 
+      // The server discovered (after streaming) that the reply contained junk — rewrite the
+      // in-progress bubble with the given text, or drop it entirely when the text is empty
+      // (a clean retry will stream a fresh reply next).
+      if (evt.type === 'assistant_replace') {
+        if (streamingBubble && !evt.text) { streamingBubble.remove(); streamingBubble = null; }
+        else if (evt.text) {
+          if (!streamingBubble) streamingBubble = add('assistant', '');
+          streamingBubble.textContent = evt.text;
+        }
+        log.scrollTop = log.scrollHeight;
+        return;
+      }
+
       // Anything else ends the message that was streaming — render it now it's complete.
       if (streamingBubble) { renderRich(streamingBubble); streamingBubble = null; }
 

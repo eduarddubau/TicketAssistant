@@ -102,14 +102,7 @@ public sealed class OrchestrationLoop(
         else
         {
             logger.LogInformation("User declined {Tool}", call.Name);
-            // Spelled out at length on purpose: a terse "user declined" reads as ambiguous to
-            // smaller models, which then invent an explanation (e.g. claiming a duplicate
-            // ticket exists). State exactly what happened and what to do next.
-            result = $"The user declined the {call.Name} action in the confirmation card, so it " +
-                     "was NOT run and nothing was created or changed. This does not mean a " +
-                     "duplicate exists or that anything failed — the user simply chose not to " +
-                     "proceed. Briefly acknowledge that you did not go ahead, and ask what they " +
-                     "would like to do instead. Do not mention any other ticket.";
+            result = DeclineResult(call.Name);
         }
 
         messages.Add(new ChatMessage(ChatRole.Tool, [new FunctionResultContent(callId, result)]));
@@ -144,6 +137,10 @@ public sealed class OrchestrationLoop(
         // retry once on that, then apologise rather than loop forever.
         const int maxBotchedAttempts = 2;
         var botchedAttempts = 0;
+
+        // Nudge a replayed-after-decline create only once per run; if the model insists a
+        // second time, let it through — the confirmation card is the real safety net.
+        var nudgedRepeatedCreate = false;
 
         for (var turn = 0; ; turn++)
         {
@@ -251,20 +248,41 @@ public sealed class OrchestrationLoop(
                 yield return new OrchestrationEvent.AssistantTextDelta(buffer.ToString());
             }
 
-            // Malformed tool call: the model wrote a tool call as text instead of calling it. It
-            // was never streamed, so nudge it to try again; if it keeps failing, apologise rather
-            // than surface the blob. The botched reply is left out of history to avoid modelling it.
-            if (calls.Count == 0 && !streamedText && LooksLikeToolCallText(response.Text))
+            // Malformed tool call: the model wrote a tool call as text instead of calling it —
+            // either the whole reply is a JSON blob (caught before streaming by the buffer) or
+            // the blob is embedded mid-sentence in prose that already streamed. Either way,
+            // nudge the model to try again; if it keeps failing, apologise rather than surface
+            // the blob. The botched reply is left out of history to avoid modelling it.
+            var blobEmbeddedInStreamedText = streamedText && ContainsToolCallBlob(response.Text);
+            if (calls.Count == 0
+                && ((!streamedText && LooksLikeToolCallText(response.Text)) || blobEmbeddedInStreamedText))
             {
                 botchedAttempts++;
-                logger.LogWarning("Model wrote a malformed tool call as text (attempt {Attempt}): {Preview}",
-                    botchedAttempts, Truncate(response.Text, 120));
+                logger.LogWarning("Model wrote a malformed tool call as text (attempt {Attempt}, embedded: {Embedded}): {Preview}",
+                    botchedAttempts, blobEmbeddedInStreamedText, Truncate(response.Text, 120));
 
                 if (botchedAttempts >= maxBotchedAttempts)
                 {
-                    yield return new OrchestrationEvent.AssistantText(
-                        "Sorry — I had trouble with that. Could you rephrase or give me a bit more detail?");
+                    const string apology =
+                        "Sorry — I had trouble with that. Could you rephrase or give me a bit more detail?";
+                    // If junk already streamed, rewrite the bubble instead of adding a new one.
+                    if (blobEmbeddedInStreamedText)
+                    {
+                        yield return new OrchestrationEvent.AssistantReplace(apology);
+                    }
+                    else
+                    {
+                        yield return new OrchestrationEvent.AssistantText(apology);
+                    }
+
                     yield break;
+                }
+
+                if (blobEmbeddedInStreamedText)
+                {
+                    // The junk is already on screen — wipe the streamed bubble; the retry will
+                    // stream a fresh reply in its place.
+                    yield return new OrchestrationEvent.AssistantReplace("");
                 }
 
                 messages.Add(new ChatMessage(ChatRole.User,
@@ -322,6 +340,35 @@ public sealed class OrchestrationLoop(
                     // create-specific guardrails, checked before surfacing a confirmation card.
                     if (call.Name == TicketTools.CreateTicketToolName)
                     {
+                        // Replay of a just-declined ticket: after a decline the model sometimes
+                        // re-emits its previous create_ticket verbatim instead of reading the
+                        // user's newest message. If that message describes a *different* problem
+                        // (declined a screen ticket, then said "internet is down"), bounce the
+                        // call back once with the message quoted so the model re-decides. A pure
+                        // consent message ("yes, go ahead") is left alone — re-proposing the
+                        // declined ticket is exactly right then.
+                        if (!nudgedRepeatedCreate
+                            && IsRepeatOfDeclinedCreate(messages, arguments, out var declinedTitle, out var declinedDescription))
+                        {
+                            var latestUserText = LatestUserText(messages);
+                            if (DescribesSomethingNew(latestUserText, declinedTitle, declinedDescription))
+                            {
+                                nudgedRepeatedCreate = true;
+                                logger.LogInformation(
+                                    "Nudged create_ticket: replay of declined ticket \"{Title}\"; latest user message: \"{UserText}\"",
+                                    declinedTitle, Truncate(latestUserText, 80));
+                                messages.Add(new ChatMessage(ChatRole.Tool, [new FunctionResultContent(
+                                    call.CallId,
+                                    $"Not executed — this is the same ticket (\"{declinedTitle}\") the user just " +
+                                    "declined. That ticket was never created and does not exist, so never refer to " +
+                                    $"it as an existing or open ticket. The user's latest message was: " +
+                                    $"\"{latestUserText}\". If that describes a different problem, call create_ticket " +
+                                    "with a title and description based on that message. Only re-propose the declined " +
+                                    "ticket if the user explicitly asked you to go ahead with it after declining.")]));
+                                continue;
+                            }
+                        }
+
                         var missing = MissingCreateTicketFields(arguments);
                         if (missing.Count > 0)
                         {
@@ -406,6 +453,104 @@ public sealed class OrchestrationLoop(
             }
         }
     }
+
+    /// <summary>
+    /// The tool result recorded when the user declines a confirmation card. Spelled out at
+    /// length on purpose: a terse "user declined" reads as ambiguous to smaller models, which
+    /// then invent an explanation (e.g. claiming a duplicate ticket exists). State exactly
+    /// what happened and what to do next.
+    /// </summary>
+    private static string DeclineResult(string toolName) =>
+        $"The user declined the {toolName} action in the confirmation card, so it was NOT run " +
+        "and nothing was created or changed. This does not mean a duplicate exists or that " +
+        "anything failed — the user simply chose not to proceed. Briefly acknowledge that you " +
+        "did not go ahead, and ask what they would like to do instead. Do not mention any other " +
+        "ticket. If their next message describes a different problem, build a brand-new ticket " +
+        "from that message — do not reuse this declined ticket's title or description.";
+
+    /// <summary>Whether a recorded tool result is the decline note for <paramref name="toolName"/>.</summary>
+    private static bool IsDeclineResultFor(string toolName, object? result) =>
+        result?.ToString()?.StartsWith($"The user declined the {toolName} action", StringComparison.Ordinal) == true;
+
+    /// <summary>
+    /// Detects the model replaying a create_ticket the user just declined: after a decline,
+    /// weak models sometimes re-emit their previous tool call verbatim instead of reading the
+    /// user's newest message (so "internet is down" gets a confirmation card for the declined
+    /// "screen is broken" ticket). True when the most recently declined create in this
+    /// conversation has the same title as the newly proposed one.
+    /// </summary>
+    private static bool IsRepeatOfDeclinedCreate(
+        List<ChatMessage> messages,
+        IDictionary<string, object?> arguments,
+        out string declinedTitle,
+        out string declinedDescription)
+    {
+        declinedTitle = string.Empty;
+        declinedDescription = string.Empty;
+
+        // Find the last declined create_ticket result, then the call it belonged to.
+        var declinedResult = messages
+            .SelectMany(m => m.Contents)
+            .OfType<FunctionResultContent>()
+            .LastOrDefault(r => IsDeclineResultFor(TicketTools.CreateTicketToolName, r.Result));
+        if (declinedResult is null)
+        {
+            return false;
+        }
+
+        var declinedCall = messages
+            .SelectMany(m => m.Contents)
+            .OfType<FunctionCallContent>()
+            .LastOrDefault(c => c.CallId == declinedResult.CallId);
+        if (declinedCall?.Arguments is null)
+        {
+            return false;
+        }
+
+        var oldTitle = ArgString(declinedCall.Arguments, "title")?.Trim();
+        var newTitle = ArgString(arguments, "title")?.Trim();
+        if (string.IsNullOrEmpty(oldTitle) || !string.Equals(oldTitle, newTitle, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        declinedTitle = oldTitle;
+        declinedDescription = ArgString(declinedCall.Arguments, "description") ?? "";
+        return true;
+    }
+
+    // Words that signal "go ahead" rather than describing a new problem. Stripped from the
+    // user's message before deciding whether it introduces new content (see below).
+    private static readonly HashSet<string> ConsentWords = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "yes", "yeah", "okay", "sure", "please", "ahead", "proceed", "create", "anyway",
+        "actually", "fine", "confirm", "correct", "right", "still", "want", "need", "just"
+    };
+
+    /// <summary>
+    /// Whether the user's latest message brings up something new, unrelated to the ticket they
+    /// just declined. True = they've moved on (e.g. declined a screen ticket, then said
+    /// "internet is down") so a replay of the declined ticket is wrong. False = the message is
+    /// pure consent ("yes, go ahead") or still about the declined ticket, so re-proposing it
+    /// is legitimate.
+    /// </summary>
+    private static bool DescribesSomethingNew(string latestUserText, string declinedTitle, string declinedDescription)
+    {
+        var latest = MeaningfulTokens(latestUserText);
+        latest.ExceptWith(ConsentWords);
+        if (latest.Count == 0)
+        {
+            return false; // nothing but consent/filler — the user isn't describing a new issue
+        }
+
+        var declined = MeaningfulTokens(declinedTitle);
+        declined.UnionWith(MeaningfulTokens(declinedDescription));
+        return !latest.Overlaps(declined);
+    }
+
+    /// <summary>The text of the user's most recent message, used to re-focus a distracted model.</summary>
+    private static string LatestUserText(List<ChatMessage> messages) =>
+        messages.LastOrDefault(m => m.Role == ChatRole.User)?.Text?.Trim() ?? "";
 
     /// <summary>
     /// Pulls a ticket id out of whatever a tool returned. AIFunction.InvokeAsync hands back the
@@ -543,6 +688,29 @@ public sealed class OrchestrationLoop(
         return trimmed.Contains("\"parameters\"", StringComparison.OrdinalIgnoreCase)
             || trimmed.Contains("\"arguments\"", StringComparison.OrdinalIgnoreCase)
             || _toolsByName.Keys.Any(name => trimmed.Contains(name, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// Like <see cref="LooksLikeToolCallText"/>, but finds a tool-call blob buried anywhere in
+    /// prose (e.g. "I have a new ticket for you. {"name": "create_ticket", …}") rather than
+    /// only at the start. Tries each '{' as a candidate start of a blob.
+    /// </summary>
+    private bool ContainsToolCallBlob(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return false;
+        }
+
+        for (var i = text.IndexOf('{'); i >= 0; i = text.IndexOf('{', i + 1))
+        {
+            if (LooksLikeToolCallText(text[i..]))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static string Truncate(string text, int max) =>

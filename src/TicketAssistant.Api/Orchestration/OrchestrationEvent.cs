@@ -22,6 +22,14 @@ public abstract record OrchestrationEvent
     public sealed record AssistantTextDelta(string Text) : OrchestrationEvent;
 
     /// <summary>
+    /// Replace whatever has been streamed for the current reply with this text. Used when
+    /// the loop discovers, only after streaming, that the reply contained junk (e.g. a tool
+    /// call written out as JSON mid-sentence) — the UI rewrites the in-progress bubble
+    /// instead of leaving the junk on screen.
+    /// </summary>
+    public sealed record AssistantReplace(string Text) : OrchestrationEvent;
+
+    /// <summary>
     /// A tool finished running (e.g. search_tickets). Carries which tool and whether it
     /// succeeded, so the UI can show a small status line like "🔧 search_tickets ✓".
     /// </summary>
