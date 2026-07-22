@@ -99,6 +99,35 @@ confirmation card you can edit before it creates anything. Watch it appear on th
 To test per-user isolation, change the **user** field in the console header (it defaults to
 `alice`, who owns the seed tickets) — a different user sees only their own tickets.
 
+### GPU acceleration for Ollama (optional)
+
+By default Ollama runs on the CPU. If the host has an NVIDIA GPU, you can opt in to GPU
+inference — replies get dramatically faster — by starting the stack with the extra override
+file:
+
+```bash
+podman compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+```
+
+One-time host setup first (Fedora shown; see the [NVIDIA container toolkit docs](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
+for other distros):
+
+```bash
+# 1. NVIDIA driver — `nvidia-smi` must print your GPU
+# 2. the container toolkit
+sudo dnf install nvidia-container-toolkit
+
+# 3. generate the CDI spec that lets podman see the GPU
+sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml
+
+# sanity check — should print your GPU from inside a container
+podman run --rm --device nvidia.com/gpu=all ubuntu nvidia-smi
+```
+
+Verify Ollama picked it up with `podman compose exec ollama ollama ps` after the first
+prompt — the `PROCESSOR` column should say `GPU` (or a GPU/CPU split if the model doesn't
+fully fit in VRAM). Leave the `-f docker-compose.gpu.yml` flag off to go back to CPU.
+
 ### Locally with the .NET SDK
 
 Requires the .NET 10 SDK and a local Ollama (`ollama serve` + `ollama pull llama3.2:3b`).
