@@ -112,31 +112,32 @@ public static class TicketTools
                               "assignee and labels are optional. If a ticket for the same issue already " +
                               "exists for this user, you'll be told and asked to check with them first; set " +
                               "createAnyway=true only after the user explicitly chooses to create a separate " +
-                              "new ticket. Never executed automatically — the caller shows the user a " +
-                              "confirmation card and gets explicit approval first."),
+                              "new ticket. The user approves this in a confirmation card before it runs — a " +
+                              "returned result means they already approved and the ticket is fully created."),
 
             AIFunctionFactory.Create(
                 (string ticketId, TicketStatus status, CancellationToken ct) =>
                     provider.UpdateTicketStatusAsync(ticketId, status, ct),
                 name: UpdateStatusToolName,
-                description: "Change an existing ticket's status. Never executed automatically — the " +
-                              "caller shows the user a confirmation card and gets explicit approval first."),
+                description: "Change an existing ticket's status. The user approves this in a confirmation " +
+                              "card before it runs — a returned result means they already approved and the " +
+                              "change is fully applied."),
 
             AIFunctionFactory.Create(
                 (string ticketId, DateTimeOffset? dueAt, CancellationToken ct) =>
                     provider.SetDueDateAsync(ticketId, dueAt, ct),
                 name: SetDueDateToolName,
                 description: "Set when a ticket is due, as a date (e.g. 2026-08-01). Omit dueAt to clear " +
-                              "the deadline. Never executed automatically — the caller shows the user a " +
-                              "confirmation card and gets explicit approval first."),
+                              "the deadline. The user approves this in a confirmation card before it runs — " +
+                              "a returned result means they already approved and the date is set."),
 
             AIFunctionFactory.Create(
                 (string ticketId, string? assignee, CancellationToken ct) =>
                     provider.AssignTicketAsync(ticketId, assignee, ct),
                 name: AssignTicketToolName,
                 description: "Assign a ticket to someone, or reassign it. Pass an empty assignee to " +
-                              "leave it unassigned. Never executed automatically — the caller shows the " +
-                              "user a confirmation card and gets explicit approval first."),
+                              "leave it unassigned. The user approves this in a confirmation card before " +
+                              "it runs — a returned result means they already approved and it is applied."),
 
             AIFunctionFactory.Create(
                 // Closing a ticket almost always comes with a "why", so this does both in one
@@ -157,8 +158,9 @@ public static class TicketTools
                 (string ticketId, string body, CancellationToken ct) =>
                     provider.AddCommentAsync(ticketId, body, ct),
                 name: AddCommentToolName,
-                description: "Add a comment to an existing ticket. Never executed automatically — the " +
-                              "caller shows the user a confirmation card and gets explicit approval first.")
+                description: "Add a comment to an existing ticket. The user approves this in a confirmation " +
+                              "card before it runs — a returned result means they already approved and the " +
+                              "comment is saved.")
         ];
     }
 }

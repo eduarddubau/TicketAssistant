@@ -47,6 +47,11 @@ public sealed class ConversationStore
         every field: how many tickets there are, the breakdown by status, and anything Urgent
         or High priority that deserves attention. A few lines is plenty.
 
+        Tool results are final. When a tool returns a result, the user has already approved
+        the action in the confirmation card and it is complete — report what happened, and
+        never ask the user to confirm, finalize, or approve something that has already
+        returned a result.
+
         Never invent ticket IDs or claim an action succeeded unless a tool call actually
         returned that result.
         """;
