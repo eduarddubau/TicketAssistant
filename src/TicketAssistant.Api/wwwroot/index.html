@@ -27,6 +27,10 @@
     .user { align-self: flex-end; background: #2563eb; color: #fff; }
     .assistant { align-self: flex-start; background: color-mix(in srgb, CanvasText 8%, Canvas); }
     .assistant a { color: #2563eb; font-weight: 600; }
+    .assistant code {
+      font-family: ui-monospace, monospace; font-size: .85em; padding: .05rem .3rem;
+      border-radius: 4px; background: color-mix(in srgb, CanvasText 10%, transparent);
+    }
     .tool { align-self: center; font-size: 12px; opacity: .7; font-family: ui-monospace, monospace; }
     .err { align-self: center; color: #dc2626; font-size: 13px; }
     .thinking { align-self: flex-start; font-size: 13px; opacity: .7; display: flex; align-items: center; gap: .5rem; }
@@ -148,19 +152,40 @@
       const el = document.createElement('div');
       el.className = 'msg ' + cls;
       el.textContent = text;
-      if (cls === 'assistant') linkifyTickets(el);
+      if (cls === 'assistant') renderRich(el);
       log.appendChild(el);
       log.scrollTop = log.scrollHeight;
       return el;
     }
 
-    // Turns ticket ids like PROJ-1001 into links to that ticket on the board. Works on the
-    // element's text nodes only (never on markup), so model output can't inject HTML.
+    // Models write Markdown; render the small subset they actually use. The raw text is
+    // HTML-escaped FIRST, then safe tags are introduced, so model output can't inject markup.
+    function mdToHtml(text) {
+      let h = (text ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+      h = h.replace(/`([^`\n]+)`/g, '<code>$1</code>');          // `inline code`
+      h = h.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>'); // **bold**
+      h = h.replace(/^#{1,4}\s+(.+)$/gm, '<strong>$1</strong>');  // # headings -> bold lines
+      h = h.replace(/^(\s*)[*-]\s+/gm, '$1\u2022 ');             // "* item" / "- item" -> "• item"
+      return h;
+    }
+
+    // Converts a bubble's accumulated plain text into rendered markdown + ticket links.
+    // Called once per message, after it's complete (streaming appends plain text until then).
+    function renderRich(el) {
+      el.innerHTML = mdToHtml(el.textContent);
+      linkifyTickets(el);
+    }
+
+    // Turns ticket ids like PROJ-1001 into links to that ticket on the board. Walks text
+    // nodes only (never markup), so model output can't inject HTML.
     const TICKET_ID = /\b([A-Z]{2,}-\d+)\b/g;
 
     function linkifyTickets(el) {
-      for (const node of [...el.childNodes]) {
-        if (node.nodeType !== Node.TEXT_NODE || !TICKET_ID.test(node.textContent)) continue;
+      const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      const nodes = [];
+      while (walker.nextNode()) nodes.push(walker.currentNode);
+      for (const node of nodes) {
+        if (!TICKET_ID.test(node.textContent)) continue;
         TICKET_ID.lastIndex = 0;
         const frag = document.createDocumentFragment();
         let last = 0, m;
@@ -211,8 +236,8 @@
           handleEvent(JSON.parse(line.slice(5).trim()));
         }
       }
-      // Stream finished; linkify a message still open at the end.
-      if (streamingBubble) { linkifyTickets(streamingBubble); streamingBubble = null; }
+      // Stream finished; render a message still open at the end.
+      if (streamingBubble) { renderRich(streamingBubble); streamingBubble = null; }
     }
 
     // The bubble currently being streamed into, so consecutive deltas append to one message.
@@ -226,8 +251,8 @@
         return;
       }
 
-      // Anything else ends the message that was streaming — linkify it now it's complete.
-      if (streamingBubble) { linkifyTickets(streamingBubble); streamingBubble = null; }
+      // Anything else ends the message that was streaming — render it now it's complete.
+      if (streamingBubble) { renderRich(streamingBubble); streamingBubble = null; }
 
       if (evt.type === 'assistant_text') add('assistant', evt.text);
       else if (evt.type === 'tool_executed') add('tool', '🔧 ' + evt.toolName + (evt.succeeded ? ' ✓' : ' ✗'));
