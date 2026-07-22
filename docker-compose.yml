@@ -48,8 +48,15 @@ services:
       OLLAMA_HOST: http://ollama:11434
       OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.2:3b}
     restart: "no"
-    # $$ so the variable is resolved by the shell at runtime, not by compose.
-    entrypoint: ["/bin/sh", "-c", "until ollama list >/dev/null 2>&1; do sleep 1; done; exec ollama pull \"$$OLLAMA_MODEL\""]
+    # $$ so variables are resolved by the shell at runtime, not by compose. The pull is
+    # retried on failure (ollama resumes partial downloads, so retries are cheap) — a
+    # network blip shouldn't leave a fresh install without its model.
+    entrypoint: ["/bin/sh", "-c", "until ollama list >/dev/null 2>&1; do sleep 1; done;
+      n=0; until ollama pull \"$$OLLAMA_MODEL\"; do
+        n=$$((n+1));
+        if [ $$n -ge 10 ]; then echo 'Giving up after 10 attempts.'; exit 1; fi;
+        echo \"Model pull failed (attempt $$n/10) - retrying in 10s...\"; sleep 10;
+      done"]
 
   # Stands in for a real external ticketing system (Jira/Zendesk/...) so created tickets
   # can be seen landing in a separate app. Board UI at http://localhost:5090/
