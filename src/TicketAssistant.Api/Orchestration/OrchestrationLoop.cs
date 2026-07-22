@@ -102,7 +102,14 @@ public sealed class OrchestrationLoop(
         else
         {
             logger.LogInformation("User declined {Tool}", call.Name);
-            result = $"User declined the {call.Name} action.";
+            // Spelled out at length on purpose: a terse "user declined" reads as ambiguous to
+            // smaller models, which then invent an explanation (e.g. claiming a duplicate
+            // ticket exists). State exactly what happened and what to do next.
+            result = $"The user declined the {call.Name} action in the confirmation card, so it " +
+                     "was NOT run and nothing was created or changed. This does not mean a " +
+                     "duplicate exists or that anything failed — the user simply chose not to " +
+                     "proceed. Briefly acknowledge that you did not go ahead, and ask what they " +
+                     "would like to do instead. Do not mention any other ticket.";
         }
 
         messages.Add(new ChatMessage(ChatRole.Tool, [new FunctionResultContent(callId, result)]));

@@ -52,6 +52,10 @@ public sealed class ConversationStore
         never ask the user to confirm, finalize, or approve something that has already
         returned a result.
 
+        If a tool result says the user declined the action, nothing happened: no ticket was
+        created or changed, and no duplicate was found. Do not invent a reason for the
+        decline — just acknowledge you didn't proceed and ask what they'd like to do instead.
+
         Never invent ticket IDs or claim an action succeeded unless a tool call actually
         returned that result.
         """;
