@@ -1,4 +1,5 @@
 using System.ClientModel;
+using System.ClientModel.Primitives;
 using System.Collections.Concurrent;
 using Anthropic;
 using Microsoft.Extensions.AI;
@@ -42,7 +43,7 @@ public sealed class ChatClientFactory(IConfiguration configuration, IHttpContext
     {
         "anthropic" => configuration["Anthropic:Model"] ?? "claude-sonnet-5",
         "openai" => configuration["OpenAI:Model"] ?? "gpt-4o-mini",
-        "google" => configuration["Google:Model"] ?? "gemini-2.0-flash",
+        "google" => configuration["Google:Model"] ?? "gemini-flash-latest",
         _ => configuration["Ollama:Model"] ?? "llama3.2:3b"
     };
 
@@ -67,12 +68,16 @@ public sealed class ChatClientFactory(IConfiguration configuration, IHttpContext
             .GetChatClient(model)
             .AsIChatClient(),
 
+        // Gemini needs its proprietary tool-call "thought signature" echoed back, which the
+        // OpenAI SDK drops — GeminiToolCallSignatureHandler patches it in at the wire level.
         "google" => new OpenAIClient(
                 new ApiKeyCredential(RequireKey("Google:ApiKey")),
                 new OpenAIClientOptions
                 {
                     Endpoint = new Uri(configuration["Google:BaseUrl"]
-                                       ?? "https://generativelanguage.googleapis.com/v1beta/openai/")
+                                       ?? "https://generativelanguage.googleapis.com/v1beta/openai/"),
+                    Transport = new HttpClientPipelineTransport(
+                        new HttpClient(new GeminiToolCallSignatureHandler(new SocketsHttpHandler())))
                 })
             .GetChatClient(model)
             .AsIChatClient(),
