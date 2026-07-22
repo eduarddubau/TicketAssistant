@@ -27,6 +27,13 @@ services:
       - "11434:11434"
     volumes:
       - ollama-data:/root/.ollama
+    # GPU toggle. Compose can't conditionally attach a device, so the device to expose
+    # comes from .env: leave OLLAMA_GPU_DEVICE unset for CPU (the default maps the
+    # harmless /dev/null), or set it to nvidia.com/gpu=all to hand the container the
+    # host's NVIDIA GPU (one-time host setup required — see README "GPU acceleration").
+    # Ollama picks automatically: GPU when it sees one, CPU otherwise.
+    devices:
+      - ${OLLAMA_GPU_DEVICE:-/dev/null}
 
   # Stands in for a real external ticketing system (Jira/Zendesk/...) so created tickets
   # can be seen landing in a separate app. Board UI at http://localhost:5090/

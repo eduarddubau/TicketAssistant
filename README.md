@@ -101,13 +101,22 @@ To test per-user isolation, change the **user** field in the console header (it 
 
 ### GPU acceleration for Ollama (optional)
 
-By default Ollama runs on the CPU. If the host has an NVIDIA GPU, you can opt in to GPU
-inference — replies get dramatically faster — by starting the stack with the extra override
-file:
+By default Ollama runs on the CPU. If the host has an NVIDIA GPU, you can switch to GPU
+inference — replies get dramatically faster — by setting one variable in `.env`:
 
 ```bash
-podman compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+# .env
+OLLAMA_GPU_DEVICE=nvidia.com/gpu=all
 ```
+
+then recreating the container:
+
+```bash
+podman compose up -d --force-recreate ollama
+```
+
+To go back to CPU, clear the variable and recreate again. Your pulled models survive either
+way (they live in the `ollama-data` volume).
 
 One-time host setup first (Fedora shown; see the [NVIDIA container toolkit docs](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
 for other distros):
@@ -126,7 +135,8 @@ podman run --rm --device nvidia.com/gpu=all ubuntu nvidia-smi
 
 Verify Ollama picked it up with `podman compose exec ollama ollama ps` after the first
 prompt — the `PROCESSOR` column should say `GPU` (or a GPU/CPU split if the model doesn't
-fully fit in VRAM). Leave the `-f docker-compose.gpu.yml` flag off to go back to CPU.
+fully fit in VRAM). llama3.2:3b (~2 GB) fits comfortably in 6 GB of VRAM; qwen3:8b (~5 GB)
+is a tight fit.
 
 ### Locally with the .NET SDK
 
