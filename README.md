@@ -93,24 +93,33 @@ Two ASP.NET Core (.NET 10) services:
 ### With Podman / Docker Compose (recommended)
 
 ```bash
-# build + start the assistant, the mock ticketing system, and Ollama.
-# The up script also attaches the NVIDIA GPU to Ollama when the host is set up for it
-# (see "GPU acceleration" below); otherwise everything runs on the CPU.
 ./up.sh          # Linux / macOS / WSL2
 .\up.ps1         # Windows PowerShell
-# or, plain compose (always CPU unless OLLAMA_GPU_DEVICE is set in .env):
-podman compose up -d          # or: docker compose up -d
 ```
 
-The chat model is **pulled automatically** on first start (the one-shot `ollama-pull`
-helper downloads `llama3.2:3b`, a couple of GB — the assistant can't answer until it
-finishes). Watch progress with:
+The up script runs in the foreground and walks through five visible stages, so you always
+see what's happening:
+
+1. **GPU check** — attaches the NVIDIA GPU to Ollama when the host is set up for it; if it
+   finds a GPU that *isn't* set up yet, it **offers to do the one-time setup right there**
+   (see "GPU acceleration" below). Saying no just means CPU.
+2. **Ollama image download** (cached after the first run)
+3. **Build** of the two services
+4. **Container start**
+5. **Chat model download** — `llama3.2:3b`, a couple of GB on the first run, streamed to
+   your terminal; instant on later runs. Changing `OLLAMA_MODEL` in `.env` and re-running
+   pulls the new model too.
+
+Every download is retried automatically on failure or stall, so a network blip doesn't
+mean debugging — worst case the script fails loudly after several attempts. It ends with
+"✔ Ready." when the assistant can actually answer.
+
+Plain compose works too (no GPU offer, CPU unless `OLLAMA_GPU_DEVICE` is set in `.env`,
+model downloads in the background — watch it with `podman compose logs -f ollama-pull`):
 
 ```bash
-podman compose logs -f ollama-pull
+podman compose up -d          # or: docker compose up -d
 ```
-
-Changing `OLLAMA_MODEL` in `.env` and re-running the up script pulls the new model too.
 
 Then open:
 
@@ -132,25 +141,31 @@ The console header has four switchers, all taking effect on the next message:
 
 ### GPU acceleration for Ollama (optional)
 
-Start the stack with `./up.sh` (Linux/macOS/WSL2) or `.\up.ps1` (Windows PowerShell)
-instead of `podman compose up -d` and the GPU is handled automatically: if an NVIDIA CDI
-spec is found the GPU is attached to the Ollama container, otherwise everything runs on
-the CPU exactly as before. (The decision has to be made at container-creation time —
-podman refuses to create a container whose GPU device isn't available — which is why the
-scripts detect it up front rather than "trying".) On Windows, podman runs containers
-inside a Linux VM (`podman machine`), so `up.ps1` asks the machine — the CDI spec and the
-container-toolkit setup below live inside that VM, not on Windows itself.
+GPU inference makes local replies dramatically faster (a 3B model that takes ~30 s per
+reply on a CPU answers in a few seconds fully in VRAM). The up scripts handle everything:
 
-Once the container has a GPU, **which one is used is chosen in the chat console**: the ⚙️
-selector next to the model field switches between *GPU (auto)* and *CPU only*, per request,
-no restart needed. It maps to Ollama's `num_gpu` option (0 = no layers offloaded to the
-GPU). With no GPU attached, both settings mean CPU.
+- **Already set up?** The GPU is attached automatically — no flags, nothing to remember.
+- **GPU present but not set up?** The script **asks** whether to do the one-time setup and,
+  on a yes, runs it right there: on Linux it installs the driver (if missing), the CUDA
+  tools, NVIDIA's container toolkit, and the CDI spec via `sudo` (you'll be asked for your
+  password); on Windows it installs the toolkit + CDI spec *inside the podman machine VM*
+  (the Windows NVIDIA driver you already have is enough host-side — WSL2 projects it into
+  the VM automatically). Saying no, or running non-interactively, just means CPU.
+- **No NVIDIA GPU?** CPU, silently.
+
+The attach decision happens at container-creation time — podman refuses to create a
+container whose GPU device isn't available, so it can't be "tried" per request; that's why
+the scripts detect up front. What *can* change per request is whether an attached GPU is
+used: the console's ⚙️ selector switches between *GPU (auto)* and *CPU only* on the next
+message, no restart (it maps to Ollama's `num_gpu` option; 0 = no layers offloaded). With
+no GPU attached, both settings mean CPU.
 
 To force the matter regardless of detection, set `OLLAMA_GPU_DEVICE=nvidia.com/gpu=all`
 (or leave it empty for CPU) in `.env` and recreate: `podman compose up -d --force-recreate
 ollama`. Pulled models survive recreation either way (they live in the `ollama-data` volume).
 
-One-time host setup for GPU use — **Linux** (Fedora shown; see the [NVIDIA container toolkit docs](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
+Prefer doing the setup by hand, or on a non-dnf distro? These are the steps the script
+runs (Fedora shown; see the [NVIDIA container toolkit docs](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
 for other distros):
 
 ```bash
@@ -189,8 +204,8 @@ podman run --rm --device nvidia.com/gpu=all ubuntu nvidia-smi
 ```
 
 This survives podman machine restarts, but a `podman machine rm` + `init` wipes the VM —
-rerun steps 2–3 afterwards. Without them, `.\up.ps1` simply reports no GPU and runs on the
-CPU; nothing breaks.
+`.\up.ps1` will simply offer the setup again afterwards. Skipping setup never breaks
+anything; it just means CPU.
 
 Verify Ollama picked it up with `podman compose exec ollama ollama ps` after the first
 prompt — the `PROCESSOR` column should say `GPU` (or a GPU/CPU split if the model doesn't
