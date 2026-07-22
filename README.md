@@ -101,11 +101,14 @@ To test per-user isolation, change the **user** field in the console header (it 
 
 ### GPU acceleration for Ollama (optional)
 
-Start the stack with `./up.sh` instead of `podman compose up -d` and the GPU is handled
-automatically: if the host has an NVIDIA CDI spec the GPU is attached to the Ollama
-container, otherwise everything runs on the CPU exactly as before. (The decision has to be
-made at container-creation time — podman refuses to create a container whose GPU device
-isn't available — which is why the script detects it up front rather than "trying".)
+Start the stack with `./up.sh` (Linux/macOS/WSL2) or `.\up.ps1` (Windows PowerShell)
+instead of `podman compose up -d` and the GPU is handled automatically: if an NVIDIA CDI
+spec is found the GPU is attached to the Ollama container, otherwise everything runs on
+the CPU exactly as before. (The decision has to be made at container-creation time —
+podman refuses to create a container whose GPU device isn't available — which is why the
+scripts detect it up front rather than "trying".) On Windows, podman runs containers
+inside a Linux VM (`podman machine`), so `up.ps1` asks the machine — the CDI spec and the
+container-toolkit setup below live inside that VM, not on Windows itself.
 
 Once the container has a GPU, **which one is used is chosen in the chat console**: the ⚙️
 selector next to the model field switches between *GPU (auto)* and *CPU only*, per request,
