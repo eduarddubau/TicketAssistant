@@ -35,6 +35,22 @@ services:
     devices:
       - ${OLLAMA_GPU_DEVICE:-/dev/null}
 
+  # One-shot helper: pulls the chat model into the ollama service on startup, so a fresh
+  # clone works without a manual `ollama pull`. Idempotent — when the model is already
+  # there it just verifies and exits. Watch first-run download progress with:
+  #   podman compose logs -f ollama-pull
+  ollama-pull:
+    image: ollama/ollama:latest
+    depends_on:
+      - ollama
+    environment:
+      # The ollama CLI talks to the server container instead of starting its own.
+      OLLAMA_HOST: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.2:3b}
+    restart: "no"
+    # $$ so the variable is resolved by the shell at runtime, not by compose.
+    entrypoint: ["/bin/sh", "-c", "until ollama list >/dev/null 2>&1; do sleep 1; done; exec ollama pull \"$$OLLAMA_MODEL\""]
+
   # Stands in for a real external ticketing system (Jira/Zendesk/...) so created tickets
   # can be seen landing in a separate app. Board UI at http://localhost:5090/
   ticketing-mock:

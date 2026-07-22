@@ -93,17 +93,24 @@ Two ASP.NET Core (.NET 10) services:
 ### With Podman / Docker Compose (recommended)
 
 ```bash
-# 1. build + start the assistant, the mock ticketing system, and Ollama.
-#    The up script also attaches the NVIDIA GPU to Ollama when the host is set up for it
-#    (see "GPU acceleration" below); otherwise everything runs on the CPU.
+# build + start the assistant, the mock ticketing system, and Ollama.
+# The up script also attaches the NVIDIA GPU to Ollama when the host is set up for it
+# (see "GPU acceleration" below); otherwise everything runs on the CPU.
 ./up.sh          # Linux / macOS / WSL2
 .\up.ps1         # Windows PowerShell
 # or, plain compose (always CPU unless OLLAMA_GPU_DEVICE is set in .env):
 podman compose up -d          # or: docker compose up -d
-
-# 2. pull a tool-calling-capable model into the Ollama container (one time, a few GB)
-podman compose exec ollama ollama pull llama3.2:3b
 ```
+
+The chat model is **pulled automatically** on first start (the one-shot `ollama-pull`
+helper downloads `llama3.2:3b`, a couple of GB — the assistant can't answer until it
+finishes). Watch progress with:
+
+```bash
+podman compose logs -f ollama-pull
+```
+
+Changing `OLLAMA_MODEL` in `.env` and re-running the up script pulls the new model too.
 
 Then open:
 
