@@ -20,10 +20,18 @@ approval before it changes anything.
   **ticket backend** without touching the orchestration logic.
 - **Human-in-the-loop writes** — every action that changes a ticket pauses for a confirmation
   card the user can **edit** before approving, and the last change can be **undone**.
-- **Guardrails** — the assistant asks for missing fields instead of guessing, and detects
-  likely **duplicate** tickets, offering to reopen/update the existing one (and linking the
-  two if you create a separate ticket anyway).
+- **Guardrails around a fallible model** — the loop, not the model, enforces the rules:
+  - asks for **missing fields** instead of letting the model guess;
+  - detects likely **duplicate** tickets, offering to reopen/update the existing one (and
+    linking the two if you create a separate ticket anyway);
+  - catches **malformed tool calls** (the model printing JSON instead of calling the tool),
+    scrubs them off the screen, and retries;
+  - after a **declined** confirmation, stops the model from replaying the declined ticket
+    when your next message describes a different problem — while still allowing it when you
+    say "actually, go ahead".
 - **Per-user scoping** — a user only sees tickets they created.
+- **Local GPU/CPU choice** — Ollama can run on the host's NVIDIA GPU, auto-detected at
+  startup and switchable live from the console.
 
 ### What the assistant can do
 
@@ -62,24 +70,35 @@ Two ASP.NET Core (.NET 10) services:
 
 - **`Orchestration/`** — the core.
   - `OrchestrationLoop.cs` — the send-model → run-tools → repeat loop, plus the confirmation
-    pause, missing-field and duplicate guardrails.
+    pause and all the guardrails (missing fields, duplicates, malformed-tool-call recovery,
+    declined-ticket replay).
   - `TicketTools.cs` — the ticket operations exposed to the model as callable tools.
-  - `ConversationStore.cs` — per-chat message history and the system prompt.
-  - `OrchestrationEvent.cs` — the events streamed to the browser (assistant text / tool ran /
-    confirmation required).
+  - `ChatClientFactory.cs` — resolves which LLM serves each request; the console's
+    provider/model/compute switchers work by sending headers this factory reads.
+  - `ConversationStore.cs` — per-chat message history, the system prompt, and the greeting.
+  - `UndoStore.cs` — remembers, per user, how to reverse the last write for "undo that".
+  - `OrchestrationEvent.cs` — the events streamed to the browser (assistant text/deltas,
+    tool ran, confirmation required, replace-streamed-text).
 - **`Providers/`** — `ITicketProvider` (the backend seam) and its implementations:
   `HttpTicketProvider` (calls the mock over REST), `InMemoryTicketProvider` (offline stub),
   and `UserIdForwardingHandler` (forwards the user id to the backend).
 - **`Models/`** — the canonical ticket model shared across the app.
-- **`wwwroot/index.html`** — a minimal browser chat console for testing (streams SSE, renders
-  the editable confirmation cards). A proper Angular frontend is planned but not built yet.
+- **`wwwroot/index.html`** — a minimal browser chat console for testing: streams SSE,
+  renders Markdown, links ticket IDs to the board, shows the editable confirmation cards,
+  and hosts the user / provider / model / GPU-CPU switchers. A proper Angular frontend is
+  planned but not built yet.
 
 ## Running it
 
 ### With Podman / Docker Compose (recommended)
 
 ```bash
-# 1. build + start the assistant, the mock ticketing system, and Ollama
+# 1. build + start the assistant, the mock ticketing system, and Ollama.
+#    The up script also attaches the NVIDIA GPU to Ollama when the host is set up for it
+#    (see "GPU acceleration" below); otherwise everything runs on the CPU.
+./up.sh          # Linux / macOS / WSL2
+.\up.ps1         # Windows PowerShell
+# or, plain compose (always CPU unless OLLAMA_GPU_DEVICE is set in .env):
 podman compose up -d          # or: docker compose up -d
 
 # 2. pull a tool-calling-capable model into the Ollama container (one time, a few GB)
@@ -96,8 +115,13 @@ Try: *"Create a ticket: the login page returns a 500 error when I submit."* — 
 will gather any missing details, warn if a similar ticket already exists, and show a
 confirmation card you can edit before it creates anything. Watch it appear on the board.
 
-To test per-user isolation, change the **user** field in the console header (it defaults to
-`alice`, who owns the seed tickets) — a different user sees only their own tickets.
+The console header has four switchers, all taking effect on the next message:
+
+- **user** — who you are; the API scopes tickets to this user. It defaults to `alice`, who
+  owns the seed tickets — change it to test isolation.
+- **provider** and **model** — which LLM answers. Ollama needs no key; the hosted providers
+  use the API keys from `.env`.
+- **⚙️ GPU/CPU** (Ollama only) — where inference runs, when the container has a GPU.
 
 ### GPU acceleration for Ollama (optional)
 
@@ -176,19 +200,24 @@ Set via `appsettings.json`, environment variables, or `.env` (see `.env.example`
 | `Llm:Provider` | `Ollama` \| `Anthropic` \| `OpenAI` \| `Google` | `Ollama` |
 | `Ollama:Model` | Local model (needs tool-calling support) | `llama3.2:3b` |
 | `Anthropic/OpenAI/Google :ApiKey` | Key for the chosen hosted provider | — |
+| `Anthropic/OpenAI/Google :Model` | Model for that provider | `claude-sonnet-5` / `gpt-4o-mini` / `gemini-flash-latest` |
 | `Tickets:Backend` | `Http` (the mock) \| `InMemory` (offline stub) | `Http` |
+| `OLLAMA_GPU_DEVICE` (.env, compose only) | Device handed to the Ollama container; the up scripts set it automatically | empty = CPU |
 
 Only Ollama runs with no API key. `qwen3:4b` / `qwen3:8b` are heavier local alternatives with
-more reliable tool calling.
+more reliable tool calling. All of these are defaults — the console's switchers override the
+provider, model, and GPU/CPU choice per request without touching configuration.
 
 ## Caveats (it's a PoC)
 
 - **No persistence** — conversations and tickets live in memory; a restart wipes everything.
 - **Not real auth** — "who the user is" comes from a client-supplied `X-User-Id` header, which
   is trivially spoofable. It demonstrates data scoping, not security.
-- **Small-model reliability** — `llama3.2:3b` sometimes emits a malformed tool call and needs a
-  retry. The orchestration logic is deterministic; the model is the flaky part. Hosted
-  providers or a larger local model behave more consistently.
+- **Small-model reliability** — `llama3.2:3b` sometimes writes a tool call as text, replays a
+  declined action, or narrates things that didn't happen. The orchestration layer catches and
+  corrects the first two (retry, guardrail) and keeps tool calls and confirmation cards
+  correct, but the model's *prose* can still be muddled. Hosted providers or a larger local
+  model behave more consistently.
 - **Duplicate detection is a heuristic** — title keyword overlap, not semantic similarity, so
   very differently-worded duplicates can slip through.
 - **Single instance only** — the in-memory stores assume one running process.
