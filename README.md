@@ -119,7 +119,7 @@ To force the matter regardless of detection, set `OLLAMA_GPU_DEVICE=nvidia.com/g
 (or leave it empty for CPU) in `.env` and recreate: `podman compose up -d --force-recreate
 ollama`. Pulled models survive recreation either way (they live in the `ollama-data` volume).
 
-One-time host setup for GPU use (Fedora shown; see the [NVIDIA container toolkit docs](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
+One-time host setup for GPU use — **Linux** (Fedora shown; see the [NVIDIA container toolkit docs](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
 for other distros):
 
 ```bash
@@ -133,6 +133,25 @@ sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml
 # sanity check — should print your GPU from inside a container
 podman run --rm --device nvidia.com/gpu=all ubuntu nvidia-smi
 ```
+
+**Windows** — the normal NVIDIA driver on Windows is step 1 (WSL2 automatically projects it
+into every Linux VM). Unlike Docker Desktop, which bundles the container-runtime GPU glue,
+podman's VM starts bare — so steps 2–3 happen *inside* the podman machine:
+
+```powershell
+# 2. the container toolkit, inside the machine's Fedora-based VM
+podman machine ssh "sudo dnf install -y nvidia-container-toolkit"
+
+# 3. generate the CDI spec inside the VM
+podman machine ssh "sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml"
+
+# sanity check — should print your GPU from inside a container
+podman run --rm --device nvidia.com/gpu=all ubuntu nvidia-smi
+```
+
+This survives podman machine restarts, but a `podman machine rm` + `init` wipes the VM —
+rerun steps 2–3 afterwards. Without them, `.\up.ps1` simply reports no GPU and runs on the
+CPU; nothing breaks.
 
 Verify Ollama picked it up with `podman compose exec ollama ollama ps` after the first
 prompt — the `PROCESSOR` column should say `GPU` (or a GPU/CPU split if the model doesn't
