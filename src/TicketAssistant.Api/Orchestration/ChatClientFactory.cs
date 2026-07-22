@@ -57,8 +57,18 @@ public sealed class ChatClientFactory(IConfiguration configuration, IHttpContext
         "anthropic" => configuration["Anthropic:Model"] ?? "claude-sonnet-5",
         "openai" => configuration["OpenAI:Model"] ?? "gpt-4o-mini",
         "google" => configuration["Google:Model"] ?? "gemini-flash-latest",
-        _ => configuration["Ollama:Model"] ?? "llama3.2:3b"
+        _ => DefaultOllamaModel()
     };
+
+    /// <summary>
+    /// Ollama uses one shared, space-separated model list (Ollama:Models) for both "what to
+    /// download on startup" and "which is the default" — the first entry is the default, the
+    /// rest exist for the console's dropdown. Falls back to the older single-model key.
+    /// </summary>
+    private string DefaultOllamaModel() =>
+        configuration["Ollama:Models"]?.Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault()
+        ?? configuration["Ollama:Model"]
+        ?? "qwen2.5:3b";
 
     /// <summary>The chat client for this request, created once per provider+model combination.</summary>
     public IChatClient Resolve()

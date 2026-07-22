@@ -10,7 +10,12 @@ services:
       # selected provider's API key is needed; Ollama needs none.
       Llm__Provider: ${LLM_PROVIDER:-Ollama}
       Ollama__BaseUrl: http://ollama:11434
-      Ollama__Model: ${OLLAMA_MODEL:-llama3.2:3b}
+      # Shared with ollama-pull below: first entry = the assistant's default model, the
+      # rest are downloaded too so the console's dropdown has choices.
+      Ollama__Models: ${OLLAMA_MODELS:-qwen2.5:3b qwen2.5:1.5b}
+      # Mirror of the GPU device handed to the ollama service below, so the status badge
+      # can tell "no GPU attached" apart from "GPU attached but idle/forced-CPU".
+      Ollama__GpuDevice: ${OLLAMA_GPU_DEVICE:-}
       Anthropic__ApiKey: ${ANTHROPIC_API_KEY:-}
       OpenAI__ApiKey: ${OPENAI_API_KEY:-}
       Google__ApiKey: ${GOOGLE_API_KEY:-}
@@ -27,6 +32,11 @@ services:
       - "11434:11434"
     volumes:
       - ollama-data:/root/.ollama
+    environment:
+      # Keep models loaded instead of unloading after ~5 idle minutes — reloading takes
+      # upwards of a minute, which would otherwise hit the first message after any pause.
+      # Override with e.g. "10m" if the (V)RAM should be freed when idle.
+      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:--1}
     # GPU toggle. Compose can't conditionally attach a device, so the device to expose
     # comes from .env: leave OLLAMA_GPU_DEVICE unset for CPU (the default maps the
     # harmless /dev/null), or set it to nvidia.com/gpu=all to hand the container the
@@ -34,6 +44,11 @@ services:
     # Ollama picks automatically: GPU when it sees one, CPU otherwise.
     devices:
       - ${OLLAMA_GPU_DEVICE:-/dev/null}
+    # On SELinux hosts (Fedora/RHEL) container labeling blocks access to the GPU devices
+    # ("Failed to initialize NVML: Insufficient Permissions") — disable labeling for this
+    # one container. Harmless on hosts without SELinux.
+    security_opt:
+      - label=disable
 
   # One-shot helper: pulls the chat models into the ollama service on startup, so a fresh
   # clone works without a manual `ollama pull`. Pulls the default model plus any extras
@@ -47,7 +62,7 @@ services:
     environment:
       # The ollama CLI talks to the server container instead of starting its own.
       OLLAMA_HOST: http://ollama:11434
-      OLLAMA_PULL_MODELS: ${OLLAMA_MODEL:-llama3.2:3b} ${OLLAMA_EXTRA_MODELS:-qwen2.5:3b}
+      OLLAMA_PULL_MODELS: ${OLLAMA_MODELS:-qwen2.5:3b qwen2.5:1.5b}
     restart: "no"
     # $$ so variables are resolved by the shell at runtime, not by compose. Each pull is
     # retried on failure (ollama resumes partial downloads, so retries are cheap) — a
@@ -60,7 +75,11 @@ services:
           if [ $$n -ge 10 ]; then echo \"Giving up on $$m after 10 attempts.\"; exit 1; fi;
           echo \"Pull of $$m failed (attempt $$n/10) - retrying in 10s...\"; sleep 10;
         done;
-      done"]
+      done;
+      first=$${OLLAMA_PULL_MODELS%% *};
+      echo \"--- loading and warming up $$first (takes a minute; messages are then instant) ---\";
+      ollama run \"$$first\" hi </dev/null >/dev/null 2>&1 || true;
+      echo \"--- $$first ready ---\""]
 
   # Stands in for a real external ticketing system (Jira/Zendesk/...) so created tickets
   # can be seen landing in a separate app. Board UI at http://localhost:5090/

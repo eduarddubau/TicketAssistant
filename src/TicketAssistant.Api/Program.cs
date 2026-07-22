@@ -76,15 +76,20 @@ var boardUrl = builder.Configuration["Tickets:BoardUrl"] ?? "http://localhost:50
 app.MapPost("/api/conversations", (ConversationStore store) =>
     Results.Ok(new { conversationId = store.Create(), greeting = ConversationStore.Greeting, boardUrl }));
 
-// Which LLM providers exist and which one this request would use, so the console can offer a
-// switcher. Callers override per request with the X-Llm-Provider / X-Llm-Model headers.
-app.MapGet("/api/llm", (ChatClientFactory chatClients) =>
+// Which LLM providers exist, which one this request would use, and which are actually
+// usable (Ollama always; hosted providers only when their API key is configured) — the
+// console uses `configured` to blank out the model dropdown for keyless providers.
+// Callers override per request with the X-Llm-Provider / X-Llm-Model headers.
+app.MapGet("/api/llm", (ChatClientFactory chatClients, IConfiguration config) =>
 {
     var (provider, model) = chatClients.Current();
     return Results.Ok(new
     {
         providers = ChatClientFactory.KnownProviders,
         defaultModels = ChatClientFactory.KnownProviders.ToDictionary(p => p, chatClients.DefaultModelFor),
+        configured = ChatClientFactory.KnownProviders.ToDictionary(
+            p => p,
+            p => p == "Ollama" || !string.IsNullOrEmpty(config[$"{p}:ApiKey"])),
         provider,
         model
     });
@@ -117,9 +122,18 @@ app.MapGet("/api/llm/ollama/models", async (IConfiguration config, CancellationT
 
 // What the local Ollama is actually running on right now (reads its /api/ps): GPU, CPU, or
 // a split when the model doesn't fully fit in VRAM. Powers the status badge next to the
-// console's GPU/CPU selector — the selector is the request, this is the reality.
+// console's GPU/CPU selector — the selector is the request, this is the reality. Also
+// reports whether the machine even has an NVIDIA GPU and whether one was attached to the
+// Ollama container, so the badge can say *why* it's on CPU ("GPU not attached").
 app.MapGet("/api/llm/ollama/status", async (IConfiguration config, CancellationToken ct) =>
 {
+    // Attached = the compose deploy handed a real device to the ollama service (the up
+    // scripts set OLLAMA_GPU_DEVICE, mirrored into this service's config; the CPU default
+    // maps the harmless /dev/null instead).
+    var gpuDevice = config["Ollama:GpuDevice"];
+    var gpuAttached = !string.IsNullOrWhiteSpace(gpuDevice) && gpuDevice != "/dev/null";
+    var hostHasGpu = HostHasNvidiaGpu();
+
     try
     {
         using var http = new HttpClient
@@ -132,7 +146,7 @@ app.MapGet("/api/llm/ollama/status", async (IConfiguration config, CancellationT
         if (loaded.ValueKind != JsonValueKind.Object)
         {
             // Nothing in memory — Ollama unloads idle models after a few minutes.
-            return Results.Ok(new { loaded = false, model = (string?)null, processor = (string?)null });
+            return Results.Ok(new { loaded = false, model = (string?)null, processor = (string?)null, gpuAttached, hostHasGpu });
         }
 
         var name = loaded.GetProperty("name").GetString();
@@ -141,11 +155,11 @@ app.MapGet("/api/llm/ollama/status", async (IConfiguration config, CancellationT
         var processor = sizeVram <= 0 ? "CPU"
             : sizeVram >= size ? "GPU"
             : $"{(int)(sizeVram * 100.0 / size)}% GPU / CPU";
-        return Results.Ok(new { loaded = true, model = name, processor });
+        return Results.Ok(new { loaded = true, model = name, processor, gpuAttached, hostHasGpu });
     }
     catch
     {
-        return Results.Ok(new { loaded = false, model = (string?)null, processor = (string?)null });
+        return Results.Ok(new { loaded = false, model = (string?)null, processor = (string?)null, gpuAttached, hostHasGpu });
     }
 });
 
@@ -189,6 +203,37 @@ app.Run();
 // Streams the loop's events to the browser as Server-Sent Events: each event is turned into
 // a small JSON object and written as a "data: {...}" frame, flushed immediately so the UI
 // updates live instead of waiting for the whole turn to finish.
+// Whether this machine has an NVIDIA GPU at all, checked via the PCI vendor id (0x10de).
+// /sys/bus/pci shows the host's devices even from inside a container, so this works both
+// containerized and in a local run (and just returns false on non-Linux).
+static bool HostHasNvidiaGpu()
+{
+    try
+    {
+        const string root = "/sys/bus/pci/devices";
+        if (!Directory.Exists(root))
+        {
+            return false;
+        }
+
+        foreach (var device in Directory.EnumerateDirectories(root))
+        {
+            var vendorFile = Path.Combine(device, "vendor");
+            if (File.Exists(vendorFile)
+                && File.ReadAllText(vendorFile).Trim().Equals("0x10de", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+    catch
+    {
+        return false;
+    }
+}
+
 static async Task WriteSseAsync(
     HttpResponse response,
     IAsyncEnumerable<OrchestrationEvent> events,

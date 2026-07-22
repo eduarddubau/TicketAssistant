@@ -15,6 +15,29 @@ Set-Location $PSScriptRoot
 
 function Step([string]$Message) { Write-Host ""; Write-Host "==> $Message" -ForegroundColor White }
 
+# Every ending — success or any failure — goes through here: print a clear banner (the
+# error text itself is in the output just above) so the outcome is obvious, and tell the
+# user the window is safe to close. Non-interactive runs skip that note.
+function Finish([int]$Code) {
+    Write-Host ""
+    if ($Code -eq 0) {
+        Write-Host "Success - everything is up and ready." -ForegroundColor Green
+        Write-Host "  Chat console  -> http://localhost:5080/"
+        Write-Host "  Ticket board  -> http://localhost:5090/"
+    }
+    else {
+        Write-Host "Startup failed (exit $Code) - the error is in the output above." -ForegroundColor Red
+    }
+    if (-not [Console]::IsInputRedirected) {
+        # The terminal window closes the moment this script exits, taking the outcome
+        # with it — so don't exit: idle until the user closes the window themselves
+        # (Ctrl+C also returns to the shell when run from one).
+        Write-Host "You may close this window (Ctrl+C returns to the shell)."
+        while ($true) { Start-Sleep -Seconds 3600 }
+    }
+    exit $Code
+}
+
 # Registry pulls occasionally stall indefinitely. Each download step runs under a timeout
 # and is retried a few times — worst case the script fails loudly after several attempts
 # instead of hanging silently. Completed layers are kept between attempts.
@@ -31,7 +54,7 @@ function Invoke-Retry {
         Start-Sleep -Seconds 5
     }
     Write-Error "Giving up on '$($Command -join ' ')' after $Attempts attempts."
-    exit 1
+    Finish 1
 }
 
 function Get-MachineCdiEntries {
@@ -107,8 +130,15 @@ Step "3/5 Building the assistant and the mock ticketing system"
 Invoke-Retry -Attempts 3 -TimeoutSec 1200 -Command @("podman", "compose", "build")
 
 Step "4/5 Starting the containers"
+# podman-compose occasionally trips over recreating an exited one-shot container
+# ("no container ... found", exit 125); a single retry settles it.
 podman compose up -d @ComposeArgs
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "compose up hit a transient error - retrying once..."
+    Start-Sleep -Seconds 2
+    podman compose up -d @ComposeArgs
+    if ($LASTEXITCODE -ne 0) { Finish $LASTEXITCODE }
+}
 
 Step "5/5 Downloading the chat model (a couple of GB on first run, instant after)"
 $puller = (podman ps -a --format '{{.Names}}' | Select-String "ollama-pull" | Select-Object -First 1).ToString()
@@ -116,10 +146,7 @@ podman logs -f $puller 2>&1
 $rc = podman inspect --format '{{.State.ExitCode}}' $puller
 if ($rc -ne "0") {
     Write-Error "Model download failed (exit $rc) - see above. Re-run .\up.ps1 to retry."
-    exit 1
+    Finish 1
 }
 
-Write-Host ""
-Write-Host "Ready." -ForegroundColor Green
-Write-Host "  Chat console  -> http://localhost:5080/"
-Write-Host "  Ticket board  -> http://localhost:5090/"
+Finish 0

@@ -74,9 +74,9 @@
     <label class="user-box">👤 user <input id="user" title="You only see tickets created by this user. Change it to test isolation." /></label>
     <label class="user-box">🧠 <select id="provider" title="Which LLM answers. Switching lets you compare how reliably each one calls tools."></select></label>
     <label class="user-box"><input id="model" title="Model id for the selected provider." /><select id="modelSelect" title="Installed Ollama models — switching takes effect on the next message." style="display:none"></select></label>
-    <label class="user-box" id="computeBox">⚙️ <select id="compute" title="Ollama only: GPU uses the graphics card when the container has one (falling back to CPU when it doesn't); CPU forces CPU-only inference. Takes effect on the next message.">
-      <option value="">GPU (auto)</option>
-      <option value="cpu">CPU only</option>
+    <label class="user-box" id="computeBox">⚙️ <select id="compute" title="Ollama only: GPU uses the graphics card when the container has one (falling back to CPU when it doesn't); CPU forces CPU-only inference. Takes effect on the next message. The badge next to it shows what's actually being used.">
+      <option value="">⚡ GPU</option>
+      <option value="cpu">🐢 CPU</option>
     </select> <span id="computeStatus" title="What Ollama is actually running on right now."></span></label>
     <button id="reset" type="button">New conversation</button>
   </header>
@@ -110,6 +110,7 @@
     let llmProvider = localStorage.getItem('ta-provider') || '';
     let llmModel = localStorage.getItem('ta-model') || '';
     let defaultModels = {};
+    let configuredProviders = {};   // provider -> has an API key (Ollama always true)
 
     // GPU/CPU choice for Ollama, applied per request (blank = GPU when available). The
     // selector is hidden for hosted providers, where compute isn't ours to pick.
@@ -130,37 +131,51 @@
     computeSelect.addEventListener('change', () => {
       llmCompute = computeSelect.value;
       localStorage.setItem('ta-compute', llmCompute);
-      add('tool', 'Ollama compute: ' + (llmCompute === 'cpu' ? 'CPU only' : 'GPU (auto)'));
+      add('tool', 'Ollama compute: ' + (llmCompute === 'cpu' ? '🐢 CPU' : '⚡ GPU'));
     });
 
-    // For Ollama the model field becomes a dropdown of what's actually installed (fast
-    // switching, no typos); hosted providers keep the free-text field. Falls back to the
-    // text field if the model list can't be fetched.
+    // The model field is a dropdown of what's actually usable: for Ollama, the models
+    // installed locally; for hosted providers, the configured model — or nothing at all
+    // when no API key is set, making "this provider isn't usable" visible at a glance.
+    // Falls back to the free-text field only if the Ollama list can't be fetched.
     async function updateModelPicker() {
+      let models = [];
       if (isOllama()) {
         try {
-          const models = await (await api('/api/llm/ollama/models')).json();
-          if (models.length) {
-            modelSelect.innerHTML = '';
-            for (const m of models) {
-              const opt = document.createElement('option');
-              opt.value = m; opt.textContent = m;
-              modelSelect.append(opt);
-            }
-            // Keep the current choice if it's installed; otherwise fall back to the first.
-            if (!models.includes(llmModel)) {
-              llmModel = models.includes(defaultModels['Ollama']) ? defaultModels['Ollama'] : models[0];
-              localStorage.setItem('ta-model', llmModel);
-            }
-            modelSelect.value = llmModel;
-            modelSelect.style.display = '';
-            modelInput.style.display = 'none';
-            return;
-          }
-        } catch { /* fall through to the text field */ }
+          models = await (await api('/api/llm/ollama/models')).json();
+        } catch { /* fall through */ }
+        if (!models.length) {
+          // Ollama unreachable — free-text field so the user can still type a model.
+          modelSelect.style.display = 'none';
+          modelInput.style.display = '';
+          return;
+        }
+      } else if (configuredProviders[llmProvider]) {
+        models = [defaultModels[llmProvider]];
+      } // else: no API key — leave the dropdown empty (blank = not usable)
+
+      modelSelect.innerHTML = '';
+      for (const m of models) {
+        const opt = document.createElement('option');
+        opt.value = m; opt.textContent = m;
+        modelSelect.append(opt);
       }
-      modelSelect.style.display = 'none';
-      modelInput.style.display = '';
+      if (!models.length) {
+        // Say why the provider is unusable rather than showing an empty control.
+        const opt = document.createElement('option');
+        opt.value = ''; opt.textContent = '⚠ no API key'; opt.disabled = true;
+        modelSelect.append(opt);
+      }
+      // Keep the current choice if it's offered; otherwise fall back sensibly.
+      if (!models.includes(llmModel)) {
+        llmModel = models.includes(defaultModels[llmProvider]) ? defaultModels[llmProvider] : (models[0] || '');
+        localStorage.setItem('ta-model', llmModel);
+      }
+      modelSelect.value = llmModel;
+      modelSelect.title = models.length ? 'Switching takes effect on the next message.'
+        : 'No API key configured for ' + llmProvider + ' — add it to .env to use this provider.';
+      modelSelect.style.display = '';
+      modelInput.style.display = 'none';
     }
 
     modelSelect.addEventListener('change', () => {
@@ -171,14 +186,39 @@
 
     // The selector above is the *request*; this badge shows the *reality* — what Ollama
     // reports it's actually running the loaded model on (its /api/ps, via the backend).
+    // Emoji make the two states unmistakable at a glance: ⚡ GPU, 🐢 CPU.
     async function refreshComputeStatus() {
       if (!isOllama()) { computeStatus.textContent = ''; return; }
       try {
         const s = await (await api('/api/llm/ollama/status')).json();
-        computeStatus.textContent = s.loaded ? '· on ' + s.processor : '· idle';
-        computeStatus.title = s.loaded
-          ? s.model + ' is running on ' + s.processor
-          : 'No model loaded right now (Ollama unloads idle models after a few minutes).';
+        // The machine has a GPU the container can't use — say so right in the badge,
+        // rather than leaving the user to wonder why "Auto" still runs on the CPU.
+        const gpuUnattached = s.hostHasGpu && !s.gpuAttached;
+        if (!s.loaded) {
+          // Idle still says what the next message will run on, so the useful part of the
+          // badge doesn't vanish whenever Ollama unloads the model.
+          const next = gpuUnattached ? ' (GPU not attached)'
+            : s.gpuAttached ? ' (⚡ GPU ready)'
+            : ' (🐢 CPU only)';
+          computeStatus.textContent = '· 💤 idle' + next;
+          computeStatus.title = 'No model loaded right now (Ollama unloads idle models after a few minutes).'
+            + (gpuUnattached ? ' This machine has an NVIDIA GPU, but it is not attached to the Ollama container — re-run the up script and accept the GPU setup to use it.'
+               : s.gpuAttached ? ' The GPU is attached — the next message will use it.'
+               : ' The next message will run on the CPU.');
+          return;
+        }
+        const emoji = s.processor === 'GPU' ? '⚡' : s.processor === 'CPU' ? '🐢' : '⚡🐢';
+        const label = s.processor === 'GPU' ? 'GPU attached'
+          : s.processor === 'CPU' ? 'CPU only'
+          : s.processor; // partial fit, e.g. "62% GPU / CPU"
+        let text = '· ' + emoji + ' ' + label;
+        let title = s.model + ' is running on ' + s.processor;
+        if (s.processor === 'CPU' && gpuUnattached) {
+          text += ' (GPU not attached)';
+          title += '. This machine has an NVIDIA GPU, but it is not attached to the Ollama container — re-run the up script and accept the GPU setup to use it.';
+        }
+        computeStatus.textContent = text;
+        computeStatus.title = title;
       } catch {
         computeStatus.textContent = '';
       }
@@ -199,6 +239,7 @@
       try {
         const info = await (await api('/api/llm')).json();
         defaultModels = info.defaultModels || {};
+        configuredProviders = info.configured || {};
         providerSelect.innerHTML = '';
         for (const p of info.providers) {
           const opt = document.createElement('option');

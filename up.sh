@@ -15,6 +15,32 @@ cd "$(dirname "$0")"
 
 step() { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 
+# Every ending — success or any failure — lands here via the EXIT trap: print a clear
+# banner (the error text itself is in the output just above) so the outcome is obvious,
+# and tell the user the window is safe to close. Non-interactive runs skip that note.
+finish() {
+  status=$?
+  echo
+  if [ "$status" -eq 0 ]; then
+    printf '\033[1;32m✔ Success — everything is up and ready.\033[0m\n'
+    echo "  Chat console  → http://localhost:5080/"
+    echo "  Ticket board  → http://localhost:5090/"
+  else
+    printf '\033[1;31m✘ Startup failed (exit %s) — the error is in the output above.\033[0m\n' "$status"
+  fi
+  if [ -t 0 ]; then
+    # The terminal window closes the moment this script exits, taking the outcome with
+    # it — so don't exit: idle until the user closes the window themselves. Ctrl+C (for
+    # shell runs) is caught and exits with the run's real status — otherwise bash would
+    # exit 130 and GUI terminals flag that as an abnormal end.
+    echo "You may close this window (Ctrl+C returns to the shell)."
+    trap 'exit '"$status" INT
+    sleep infinity || true
+  fi
+  exit "$status"
+}
+trap finish EXIT
+
 # Registry pulls occasionally stall indefinitely (observed: a pull inside compose hanging
 # with zero bytes moving and no error). Each download step therefore runs under a timeout
 # and is retried a few times — worst case the script fails loudly after several attempts
@@ -33,7 +59,9 @@ retry() { # retry <attempts> <timeout-seconds> <cmd...>
   return 1
 }
 
-has_cdi_spec() { ls /etc/cdi/nvidia*.{yaml,json} >/dev/null 2>&1; }
+# Note: no brace expansion here — `ls a b` fails if EITHER pattern matches nothing, so
+# checking nvidia*.{yaml,json} would report "no spec" when only nvidia.yaml exists.
+has_cdi_spec() { ls /etc/cdi/nvidia* >/dev/null 2>&1; }
 
 # One-time host setup for GPU containers (Fedora/RHEL). Called only after the user says
 # yes — it adds NVIDIA's repo and installs packages via sudo, which should be an explicit
@@ -102,7 +130,13 @@ step "3/5 Building the assistant and the mock ticketing system"
 retry 3 1200 podman compose build
 
 step "4/5 Starting the containers"
-podman compose up -d "$@"
+# podman-compose occasionally trips over recreating an exited one-shot container
+# ("no container ... found", exit 125); a single retry settles it.
+if ! podman compose up -d "$@"; then
+  echo "compose up hit a transient error — retrying once..."
+  sleep 2
+  podman compose up -d "$@"
+fi
 
 step "5/5 Downloading the chat model (a couple of GB on first run, instant after)"
 puller=$(podman ps -a --format '{{.Names}}' | grep ollama-pull | head -1)
@@ -112,7 +146,4 @@ if [ "$rc" != "0" ]; then
   echo "Model download failed (exit $rc) — see above. Re-run ./up.sh to retry." >&2
   exit 1
 fi
-
-printf '\n\033[1m✔ Ready.\033[0m\n'
-echo "  Chat console  → http://localhost:5080/"
-echo "  Ticket board  → http://localhost:5090/"
+# Success/fail banner + keep-window-open prompt are printed by finish() (EXIT trap).
