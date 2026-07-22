@@ -471,10 +471,16 @@ public sealed class OrchestrationLoop(
         return tokens;
     }
 
+    // A ticket created within this window counts as part of the current interaction, not an
+    // "older" ticket to warn against — so a create that fires twice (a double-firing model or
+    // the user re-asking) doesn't flag the ticket it just made as its own duplicate.
+    private static readonly TimeSpan JustCreatedWindow = TimeSpan.FromMinutes(2);
+
     /// <summary>
-    /// Returns the current user's tickets whose title strongly overlaps the proposed title —
-    /// a deliberately simple, deterministic "same issue" heuristic (keyword overlap) so dedup
-    /// works regardless of the model. The search is user-scoped by the provider.
+    /// Returns the user's *older* tickets whose title strongly overlaps the proposed title — a
+    /// deliberately simple, deterministic "same issue" heuristic (keyword overlap) so dedup
+    /// works regardless of the model. Tickets created just now (see <see cref="JustCreatedWindow"/>)
+    /// are ignored so the ticket being created isn't matched against itself. User-scoped by the provider.
     /// </summary>
     private async Task<IReadOnlyList<CanonicalTicket>> FindSimilarTicketsAsync(string? proposedTitle, CancellationToken ct)
     {
@@ -494,8 +500,15 @@ public sealed class OrchestrationLoop(
             return []; // never block a create just because the dedup lookup failed
         }
 
+        var justCreatedCutoff = DateTimeOffset.UtcNow - JustCreatedWindow;
+
         return existing.Where(t =>
         {
+            if (t.CreatedAt >= justCreatedCutoff)
+            {
+                return false; // brand-new — this is (or is part of) the current create, not an older duplicate
+            }
+
             var other = MeaningfulTokens(t.Title);
             if (other.Count == 0)
             {
