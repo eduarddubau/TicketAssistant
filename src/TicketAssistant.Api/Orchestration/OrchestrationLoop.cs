@@ -162,8 +162,43 @@ public sealed class OrchestrationLoop(
             var streaming = false;     // committed to streaming this reply as prose
             var streamedText = false;  // actually streamed at least one delta
 
-            await foreach (var update in chatClient.GetStreamingResponseAsync(messages, options, ct))
+            // Enumerate manually so a failure from the model (rate limit, network, bad key) can
+            // be turned into a friendly message instead of bubbling up as a raw stack trace.
+            // (yield return isn't allowed inside try/catch, so only MoveNext is guarded.)
+            await using var stream = chatClient
+                .GetStreamingResponseAsync(messages, options, ct)
+                .GetAsyncEnumerator(ct);
+
+            while (true)
             {
+                bool hasUpdate;
+                var failed = false;
+                try
+                {
+                    hasUpdate = await stream.MoveNextAsync();
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "The language model request failed on turn {Turn}", turn);
+                    hasUpdate = false;
+                    failed = true;
+                }
+
+                if (failed)
+                {
+                    // yield can't live inside a catch, so we surface the error out here.
+                    yield return new OrchestrationEvent.AssistantText(
+                        "Sorry — I couldn't reach the language model just now (it may be rate-limited or " +
+                        "unavailable). Please try again in a moment.");
+                    yield break;
+                }
+
+                if (!hasUpdate)
+                {
+                    break;
+                }
+
+                var update = stream.Current;
                 updates.Add(update);
                 if (string.IsNullOrEmpty(update.Text))
                 {
