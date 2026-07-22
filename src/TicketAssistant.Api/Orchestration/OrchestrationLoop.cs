@@ -129,6 +129,14 @@ public sealed class OrchestrationLoop(
         var chatClient = chatClients.Resolve();
         var options = new ChatOptions { Tools = [.. tools] };
 
+        // Ollama decides GPU vs CPU per request via num_gpu (how many model layers to offload
+        // to the GPU): 0 forces pure CPU. When the console asks for CPU we pass that through;
+        // otherwise Ollama's default applies — GPU when the container has one, CPU when not.
+        if (chatClients.CpuOnlyRequested())
+        {
+            options.AdditionalProperties = new AdditionalPropertiesDictionary { ["num_gpu"] = 0 };
+        }
+
         // Bounds runaway tool loops (e.g. a weak model repeatedly calling create_ticket
         // with empty fields even after being told what's missing).
         const int maxTurns = 8;

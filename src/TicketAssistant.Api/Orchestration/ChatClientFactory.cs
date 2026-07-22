@@ -20,6 +20,7 @@ public sealed class ChatClientFactory(IConfiguration configuration, IHttpContext
 {
     public const string ProviderHeader = "X-Llm-Provider";
     public const string ModelHeader = "X-Llm-Model";
+    public const string ComputeHeader = "X-Ollama-Compute";
 
     /// <summary>The providers the console offers; each needs its own credentials except Ollama.</summary>
     public static readonly string[] KnownProviders = ["Ollama", "Anthropic", "OpenAI", "Google"];
@@ -35,6 +36,19 @@ public sealed class ChatClientFactory(IConfiguration configuration, IHttpContext
         var provider = Header(ProviderHeader) ?? configuration["Llm:Provider"] ?? "Ollama";
         var model = Header(ModelHeader) ?? DefaultModelFor(provider);
         return (provider, model);
+    }
+
+    /// <summary>
+    /// True when this request targets Ollama and the caller asked for CPU-only inference
+    /// (X-Ollama-Compute: cpu). Hosted providers always ignore this — where their models run
+    /// isn't ours to choose. The loop translates it into Ollama's per-request num_gpu option,
+    /// so the choice takes effect immediately, without restarting the container.
+    /// </summary>
+    public bool CpuOnlyRequested()
+    {
+        var (provider, _) = Current();
+        return provider.Equals("Ollama", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(Header(ComputeHeader), "cpu", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>The configured (or built-in) default model for a provider.</summary>

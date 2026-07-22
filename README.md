@@ -101,24 +101,22 @@ To test per-user isolation, change the **user** field in the console header (it 
 
 ### GPU acceleration for Ollama (optional)
 
-By default Ollama runs on the CPU. If the host has an NVIDIA GPU, you can switch to GPU
-inference — replies get dramatically faster — by setting one variable in `.env`:
+Start the stack with `./up.sh` instead of `podman compose up -d` and the GPU is handled
+automatically: if the host has an NVIDIA CDI spec the GPU is attached to the Ollama
+container, otherwise everything runs on the CPU exactly as before. (The decision has to be
+made at container-creation time — podman refuses to create a container whose GPU device
+isn't available — which is why the script detects it up front rather than "trying".)
 
-```bash
-# .env
-OLLAMA_GPU_DEVICE=nvidia.com/gpu=all
-```
+Once the container has a GPU, **which one is used is chosen in the chat console**: the ⚙️
+selector next to the model field switches between *GPU (auto)* and *CPU only*, per request,
+no restart needed. It maps to Ollama's `num_gpu` option (0 = no layers offloaded to the
+GPU). With no GPU attached, both settings mean CPU.
 
-then recreating the container:
+To force the matter regardless of detection, set `OLLAMA_GPU_DEVICE=nvidia.com/gpu=all`
+(or leave it empty for CPU) in `.env` and recreate: `podman compose up -d --force-recreate
+ollama`. Pulled models survive recreation either way (they live in the `ollama-data` volume).
 
-```bash
-podman compose up -d --force-recreate ollama
-```
-
-To go back to CPU, clear the variable and recreate again. Your pulled models survive either
-way (they live in the `ollama-data` volume).
-
-One-time host setup first (Fedora shown; see the [NVIDIA container toolkit docs](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
+One-time host setup for GPU use (Fedora shown; see the [NVIDIA container toolkit docs](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
 for other distros):
 
 ```bash

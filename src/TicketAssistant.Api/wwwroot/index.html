@@ -61,7 +61,7 @@
     #send { padding: .6rem 1.1rem; border-radius: 8px; border: none; background: #2563eb; color: #fff; font-weight: 600; cursor: pointer; }
     #send:disabled { opacity: .5; cursor: default; }
     .user-box { display: flex; align-items: center; gap: .35rem; font-size: .8rem; opacity: .85; }
-    #provider, #model { padding: .3rem .5rem; border-radius: 6px; border: 1px solid color-mix(in srgb, CanvasText 25%, transparent); background: Canvas; color: inherit; font: inherit; font-size: .8rem; }
+    #provider, #model, #compute { padding: .3rem .5rem; border-radius: 6px; border: 1px solid color-mix(in srgb, CanvasText 25%, transparent); background: Canvas; color: inherit; font: inherit; font-size: .8rem; }
     #model { width: 9rem; }
     #user { width: 8rem; padding: .3rem .5rem; border-radius: 6px; border: 1px solid color-mix(in srgb, CanvasText 25%, transparent); background: Canvas; color: inherit; font: inherit; font-size: .8rem; }
   </style>
@@ -73,6 +73,10 @@
     <label class="user-box">👤 user <input id="user" title="You only see tickets created by this user. Change it to test isolation." /></label>
     <label class="user-box">🧠 <select id="provider" title="Which LLM answers. Switching lets you compare how reliably each one calls tools."></select></label>
     <label class="user-box"><input id="model" title="Model id for the selected provider." /></label>
+    <label class="user-box" id="computeBox">⚙️ <select id="compute" title="Ollama only: GPU uses the graphics card when the container has one (falling back to CPU when it doesn't); CPU forces CPU-only inference. Takes effect on the next message.">
+      <option value="">GPU (auto)</option>
+      <option value="cpu">CPU only</option>
+    </select></label>
     <button id="reset" type="button">New conversation</button>
   </header>
 
@@ -106,11 +110,31 @@
     let llmModel = localStorage.getItem('ta-model') || '';
     let defaultModels = {};
 
+    // GPU/CPU choice for Ollama, applied per request (blank = GPU when available). The
+    // selector is hidden for hosted providers, where compute isn't ours to pick.
+    const computeSelect = document.getElementById('compute');
+    const computeBox = document.getElementById('computeBox');
+    let llmCompute = localStorage.getItem('ta-compute') || '';
+    computeSelect.value = llmCompute;
+
+    function updateComputeVisibility() {
+      computeBox.style.display =
+        (llmProvider || 'Ollama').toLowerCase() === 'ollama' ? '' : 'none';
+    }
+    updateComputeVisibility();
+
+    computeSelect.addEventListener('change', () => {
+      llmCompute = computeSelect.value;
+      localStorage.setItem('ta-compute', llmCompute);
+      add('tool', 'Ollama compute: ' + (llmCompute === 'cpu' ? 'CPU only' : 'GPU (auto)'));
+    });
+
     // fetch wrapper that tags every request with the current user and chosen model.
     function api(url, options = {}) {
       const headers = { ...(options.headers || {}), 'X-User-Id': userId };
       if (llmProvider) headers['X-Llm-Provider'] = llmProvider;
       if (llmModel) headers['X-Llm-Model'] = llmModel;
+      if (llmCompute) headers['X-Ollama-Compute'] = llmCompute;
       return fetch(url, { ...options, headers });
     }
 
@@ -129,6 +153,7 @@
         llmModel = llmModel || info.model;
         providerSelect.value = llmProvider;
         modelInput.value = llmModel;
+        updateComputeVisibility();
       } catch { /* switcher is optional — the server default still applies */ }
     }
 
@@ -139,6 +164,7 @@
       modelInput.value = llmModel;
       localStorage.setItem('ta-provider', llmProvider);
       localStorage.setItem('ta-model', llmModel);
+      updateComputeVisibility();
       add('tool', 'now using ' + llmProvider + (llmModel ? ' · ' + llmModel : ''));
     });
 
