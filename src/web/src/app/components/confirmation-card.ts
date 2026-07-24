@@ -5,11 +5,24 @@ import { JiraProject, OrchestrationEvent } from '../models';
 type ConfirmationEvent = Extract<OrchestrationEvent, { type: 'confirmation_required' }>;
 export interface Decision { approved: boolean; callId: string; edits?: Record<string, unknown>; }
 
-interface Field { key: string; label: string; kind: 'text' | 'textarea' | 'select' | 'date'; options?: string[]; optionLabels?: Record<string, string>; required?: boolean; readonly?: boolean; }
+interface OptionGroup { label: string; options: { value: string; label: string }[]; }
+interface Field { key: string; label: string; kind: 'text' | 'textarea' | 'select' | 'date'; options?: string[]; optionLabels?: Record<string, string>; groups?: OptionGroup[]; required?: boolean; readonly?: boolean; }
 interface Spec { heading: string; verb: string; fields: Field[]; initial: Record<string, any>; edits: (v: Record<string, any>) => Record<string, unknown>; }
 
 const SEVERITIES = ['Low', 'Medium', 'High', 'Urgent'];
 const STATUSES = ['Open', 'InProgress', 'Blocked', 'Resolved', 'Closed'];
+
+// Groups projects by their source so the picker shows which provider each belongs to: the mock
+// board, then one group per Jira site. Each group becomes an <optgroup> (a labelled divider).
+function groupProjects(projects: JiraProject[]): OptionGroup[] {
+  const groups = new Map<string, { value: string; label: string }[]>();
+  for (const p of projects) {
+    const source = p.siteName ? `Jira · ${p.siteName}` : 'Mock board';
+    (groups.get(source) ?? groups.set(source, []).get(source)!)
+      .push({ value: p.key, label: `${p.key} — ${p.name}` });
+  }
+  return [...groups.entries()].map(([label, options]) => ({ label, options }));
+}
 
 // One editable card per write tool — the same field sets the original console offered, so the
 // user can review and tweak what the model proposed before it runs. When creating and the user
@@ -26,12 +39,7 @@ function specFor(evt: ConfirmationEvent, projects: JiraProject[]): Spec {
         { key: 'priority', label: 'Severity', kind: 'select', options: SEVERITIES },
       ];
       if (projects.length) {
-        fields.unshift({
-          key: 'project', label: 'Project', kind: 'select', required: true,
-          options: projects.map((p) => p.key),
-          optionLabels: Object.fromEntries(projects.map((p) =>
-            [p.key, `${p.key} — ${p.name}${p.siteName ? ' · ' + p.siteName : ''}`])),
-        });
+        fields.unshift({ key: 'project', label: 'Project', kind: 'select', required: true, groups: groupProjects(projects) });
       }
       return {
         heading: '⚠️ Review & confirm new ticket', verb: 'Create ticket',
@@ -105,7 +113,16 @@ function specFor(evt: ConfirmationEvent, projects: JiraProject[]): Spec {
             <textarea rows="3" [disabled]="!!f.readonly || decided()" [(ngModel)]="values[f.key]"></textarea>
           } @else if (f.kind === 'select') {
             <select [disabled]="!!f.readonly || decided()" [(ngModel)]="values[f.key]">
-              @for (o of f.options; track o) { <option [value]="o">{{ f.optionLabels?.[o] || o }}</option> }
+              @if (f.groups) {
+                <option value="" disabled>Select a project…</option>
+                @for (g of f.groups; track g.label) {
+                  <optgroup [label]="g.label">
+                    @for (o of g.options; track o.value) { <option [value]="o.value">{{ o.label }}</option> }
+                  </optgroup>
+                }
+              } @else {
+                @for (o of f.options; track o) { <option [value]="o">{{ f.optionLabels?.[o] || o }}</option> }
+              }
             </select>
           } @else {
             <input [type]="f.kind === 'date' ? 'date' : 'text'"
