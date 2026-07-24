@@ -1,12 +1,12 @@
 <header class="app-header">
   <h1>TicketAssistant</h1>
-  <span class="sub">{{ conversation()?.ticketBackend ?? '' }} backend</span>
+  <span class="sub">tickets across all backends</span>
 </header>
 
-<app-toolbar [ticketBackend]="conversation()?.ticketBackend ?? 'Http'" (userChanged)="onUserChanged($event)" />
+<app-toolbar [jiraEnabled]="jiraEnabled()" (userChanged)="onUserChanged($event)" />
 
-@if (isJira() && !jira.status().connected) {
-  <div class="connect-banner">Connect your Jira account (top right) to start creating and managing tickets.</div>
+@if (jiraEnabled() && !jira.status().connected) {
+  <div class="connect-banner">Connect your Jira account (top right) to include your Jira tickets and projects.</div>
 }
 
 @if (conversation(); as conv) {

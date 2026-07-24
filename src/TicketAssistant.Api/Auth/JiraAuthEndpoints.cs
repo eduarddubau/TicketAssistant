@@ -1,5 +1,4 @@
 using System.Text.Json;
-using TicketAssistant.Api.Providers;
 
 namespace TicketAssistant.Api.Auth;
 
@@ -87,20 +86,6 @@ public static class JiraAuthEndpoints
                 accountEmail = jira?.AccountEmail,
                 sites = jira?.Sites.Select(s => new { s.Name, s.SiteUrl }) ?? []
             });
-        });
-
-        // The projects the connected user can access, for the "create in…" picker. Backed by the
-        // ticket provider (same call the assistant's list_projects tool uses).
-        group.MapGet("/projects", async (ITicketProvider provider, CancellationToken ct) =>
-        {
-            try
-            {
-                return Results.Ok(await provider.ListProjectsAsync(ct));
-            }
-            catch (JiraNotConnectedException)
-            {
-                return Results.Unauthorized();
-            }
         });
 
         // Disconnect: drop the Jira tokens from the session (the session itself lives on).

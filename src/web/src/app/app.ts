@@ -4,6 +4,7 @@ import { Chat } from './components/chat';
 import { SessionService } from './services/session.service';
 import { LlmService } from './services/llm.service';
 import { JiraService } from './services/jira.service';
+import { ProjectsService } from './services/projects.service';
 import { ApiService } from './services/api.service';
 import { ConversationInfo } from './models';
 
@@ -18,16 +19,17 @@ export class App implements OnInit {
   private readonly session = inject(SessionService);
   private readonly llm = inject(LlmService);
   private readonly api = inject(ApiService);
+  private readonly projects = inject(ProjectsService);
   readonly jira = inject(JiraService);
 
   readonly conversation = signal<ConversationInfo | null>(null);
 
-  readonly isJira = computed(() => this.conversation()?.ticketBackend === 'Jira');
-  readonly chatEnabled = computed(() => !this.isJira() || this.jira.status().connected);
+  readonly jiraEnabled = computed(() => this.conversation()?.jiraEnabled ?? false);
+  readonly chatEnabled = computed(() => !this.jiraEnabled() || this.jira.status().connected);
 
   async ngOnInit(): Promise<void> {
     await this.session.ensure();
-    await Promise.all([this.llm.load(), this.jira.refresh()]);
+    await Promise.all([this.llm.load(), this.jira.refresh(), this.projects.load()]);
     await this.newConversation();
   }
 
@@ -35,7 +37,7 @@ export class App implements OnInit {
   // so nothing leaks across users.
   async onUserChanged(name: string): Promise<void> {
     await this.session.ensure(name);
-    await this.jira.refresh();
+    await Promise.all([this.jira.refresh(), this.projects.load()]);
     await this.newConversation();
   }
 

@@ -19,8 +19,8 @@ export interface ConversationInfo {
   conversationId: string;
   greeting: string;
   boardUrl: string;
-  ticketUrlTemplate: string | null;
-  ticketBackend: string;   // "Http" | "Jira" | "InMemory"
+  ticketUrlTemplate: string | null;   // mock ticket link template (…/#{id}), null if no mock backend
+  jiraEnabled: boolean;               // whether the Jira backend is active (show connect UI)
 }
 
 export interface JiraSiteInfo {

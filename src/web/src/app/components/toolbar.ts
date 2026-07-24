@@ -2,6 +2,7 @@ import { Component, EventEmitter, Input, Output, inject, signal } from '@angular
 import { LlmService } from '../services/llm.service';
 import { SessionService } from '../services/session.service';
 import { JiraService } from '../services/jira.service';
+import { ProjectsService } from '../services/projects.service';
 
 /**
  * The config strip: who you are (scopes the mock), which LLM/model to use, GPU vs CPU for Ollama
@@ -48,7 +49,7 @@ import { JiraService } from '../services/jira.service';
         </span>
       }
 
-      @if (ticketBackend === 'Jira') {
+      @if (jiraEnabled) {
         <span class="spacer"></span>
         @if (jira.status().connected) {
           <span class="jira ok">
@@ -81,12 +82,13 @@ import { JiraService } from '../services/jira.service';
   `],
 })
 export class Toolbar {
-  @Input() ticketBackend = 'Http';
+  @Input() jiraEnabled = false;
   @Output() userChanged = new EventEmitter<string>();
 
   readonly llm = inject(LlmService);
   readonly session = inject(SessionService);
   readonly jira = inject(JiraService);
+  private readonly projects = inject(ProjectsService);
 
   readonly connecting = signal(false);
   readonly error = signal<string | null>(null);
@@ -105,6 +107,7 @@ export class Toolbar {
     this.connecting.set(true);
     try {
       await this.jira.connect();
+      await this.projects.load();   // Jira projects are now available
     } catch (e: any) {
       this.error.set(e?.message ?? String(e));
     } finally {
@@ -114,5 +117,6 @@ export class Toolbar {
 
   async logout(): Promise<void> {
     await this.jira.logout();
+    await this.projects.load();     // drop the disconnected account's Jira projects
   }
 }

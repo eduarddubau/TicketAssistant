@@ -1,6 +1,6 @@
 import { Component, Input, OnDestroy, OnInit, inject, signal } from '@angular/core';
 import { ApiService } from '../services/api.service';
-import { JiraService } from '../services/jira.service';
+import { ProjectsService } from '../services/projects.service';
 import { ConversationInfo, JiraProject, OrchestrationEvent } from '../models';
 import { renderMarkdown } from '../markdown';
 import { ConfirmationCard, Decision } from './confirmation-card';
@@ -68,7 +68,7 @@ export class Chat implements OnInit, OnDestroy {
   @Input() enabled = true;
 
   private readonly api = inject(ApiService);
-  private readonly jira = inject(JiraService);
+  private readonly projectsSvc = inject(ProjectsService);
 
   readonly log = signal<LogItem[]>([]);
   readonly streaming = signal<string | null>(null);
@@ -98,9 +98,9 @@ export class Chat implements OnInit, OnDestroy {
     await this.run((onEvent) => this.api.sendMessage(this.conversation.conversationId, text, onEvent));
   }
 
-  // Projects offered on the create card — only for the Jira backend.
+  // Projects offered on the create card — across every active backend.
   cardProjects(): JiraProject[] {
-    return this.conversation.ticketBackend === 'Jira' ? this.jira.projects() : [];
+    return this.projectsSvc.projects();
   }
 
   async onDecision(d: Decision): Promise<void> {
@@ -164,12 +164,10 @@ export class Chat implements OnInit, OnDestroy {
   }
 
   private ticketHref(id: string): string | null {
-    if (this.conversation.ticketBackend === 'Jira') {
-      // Route "SUP-1" to its site via the project key (unique across the user's sites).
-      const dash = id.lastIndexOf('-');
-      const site = this.jira.siteUrlForProjectKey(dash > 0 ? id.slice(0, dash) : id);
-      return site ? `${site}/browse/${id}` : null;
-    }
+    // Jira ids route to their site via the project key; otherwise fall back to the mock template.
+    const dash = id.lastIndexOf('-');
+    const site = this.projectsSvc.siteUrlForProjectKey(dash > 0 ? id.slice(0, dash) : id);
+    if (site) return `${site}/browse/${id}`;
     return this.conversation.ticketUrlTemplate?.replace('{id}', id) ?? null;
   }
 

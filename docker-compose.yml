@@ -19,10 +19,10 @@ services:
       Anthropic__ApiKey: ${ANTHROPIC_API_KEY:-}
       OpenAI__ApiKey: ${OPENAI_API_KEY:-}
       Google__ApiKey: ${GOOGLE_API_KEY:-}
-      # Which ticket backend the assistant drives: Http (the ticketing-mock service below,
-      # default) or Jira (a real Jira Cloud site via per-user OAuth login — fill in the
-      # ATLASSIAN_* vars in .env). See the README's "Connecting a real Jira" section.
-      Tickets__Backend: ${TICKETS_BACKEND:-Http}
+      # Which ticket backends the assistant drives — space/comma separated, used together. Any of
+      # Http (the ticketing-mock service below), Jira (real Jira Cloud via per-user OAuth login —
+      # fill in the ATLASSIAN_* vars in .env), InMemory (offline stub). e.g. "Http Jira" for both.
+      Tickets__Backends: ${TICKETS_BACKENDS:-Http}
       Tickets__Http__BaseUrl: http://ticketing-mock:8080
       Tickets__Jira__ProjectKey: ${TICKETS_JIRA_PROJECT_KEY:-}
       Tickets__Jira__IssueType: ${TICKETS_JIRA_ISSUE_TYPE:-Task}

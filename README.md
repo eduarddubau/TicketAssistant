@@ -83,8 +83,10 @@ Three services (two ASP.NET Core .NET 10 + one Angular app):
 - **`Providers/`** — `ITicketProvider` (the backend seam) and its implementations:
   `HttpTicketProvider` (calls the mock over REST), `JiraTicketProvider` (a real Jira Cloud site
   via per-user OAuth — see [Connecting a real Jira](#connecting-a-real-jira-jira-cloud-per-user-oauth)),
-  `InMemoryTicketProvider` (offline stub), and `UserIdForwardingHandler` (forwards the session's
-  user id to the mock).
+  `InMemoryTicketProvider` (offline stub), `CompositeTicketProvider` (runs **several backends at
+  once** — `Tickets:Backends`, e.g. `Http Jira` — fanning reads across all and routing each write
+  to the backend that owns the target), and `UserIdForwardingHandler` (forwards the session's user
+  id to the mock).
 - **`Auth/`** — the identity layer: opaque bearer sessions (`SessionStore` / `CurrentSession`)
   that replace the old `X-User-Id` header, and the Jira OAuth flow (`JiraOAuthClient`,
   `JiraAccessTokenResolver`, `JiraAuthEndpoints`) that logs each user into their own Jira.
@@ -257,7 +259,7 @@ Set via `appsettings.json`, environment variables, or `.env` (see `.env.example`
 | `Ollama:Models` | Space-separated local models (need tool-calling support): the **first is the default**, all are auto-downloaded and offered in the console's dropdown | `qwen2.5:3b qwen2.5:1.5b` |
 | `Anthropic/OpenAI/Google :ApiKey` | Key for the chosen hosted provider | — |
 | `Anthropic/OpenAI/Google :Model` | Model for that provider | `claude-sonnet-5` / `gpt-4o-mini` / `gemini-flash-latest` |
-| `Tickets:Backend` | `Http` (the mock) \| `Jira` (real Jira Cloud via per-user OAuth, see below) \| `InMemory` (offline stub) | `Http` |
+| `Tickets:Backends` | Which backends to run **together** (space/comma separated): `Http` (the mock) · `Jira` (real Jira Cloud via per-user OAuth, see below) · `InMemory` (offline stub). e.g. `Http Jira` | `Http` |
 | `Atlassian:ClientId` / `:ClientSecret` | OAuth 2.0 (3LO) app credentials (required for `Jira`) | — |
 | `Atlassian:RedirectUri` / `:FrontendOrigin` | OAuth callback URL and the console's origin | `…:5080/api/auth/jira/callback` / `…:4200` |
 | `Tickets:Jira:ProjectKey` | *Optional* default project for new tickets (projects are otherwise chosen per ticket in the UI); also `:IssueType` / `:ScopeToReporter` | — |
@@ -287,7 +289,7 @@ creating tickets into whichever project they choose, so they can hot-switch topi
 
 **2. Fill in `.env`** (copied from `.env.example`):
 ```dotenv
-TICKETS_BACKEND=Jira
+TICKETS_BACKENDS=Http Jira      # run the mock and Jira together (or just "Jira")
 ATLASSIAN_CLIENT_ID=<your client id>
 ATLASSIAN_CLIENT_SECRET=<your client secret>
 # Optional: a default project for new tickets. Leave unset to pick per ticket in the UI.

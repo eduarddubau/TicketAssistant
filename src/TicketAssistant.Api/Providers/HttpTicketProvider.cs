@@ -18,6 +18,11 @@ public sealed class HttpTicketProvider(HttpClient http) : ITicketProvider
 
     public string Name => "mock-ticketing";
 
+    // The mock is one board; expose it as a single project so it's a selectable create target
+    // (its ids are PROJ-*). No site URL — mock ticket links come from the board template instead.
+    public Task<IReadOnlyList<TicketProject>> ListProjectsAsync(CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyList<TicketProject>>([new TicketProject("PROJ", "Mock board")]);
+
     public async Task<CanonicalTicket> GetTicketAsync(string ticketId, CancellationToken ct = default)
     {
         var dto = await http.GetFromJsonAsync<TicketDto>($"/api/tickets/{ticketId}", Json, ct)
