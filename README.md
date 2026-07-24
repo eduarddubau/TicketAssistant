@@ -44,27 +44,28 @@ an **audit trail** of what changed and when.
 
 ```
                           ┌─────────────────────────────┐
-  browser (test console)  │      TicketAssistant.Api     │        LLM (IChatClient)
-  http://localhost:5080  ─┼─▶  Orchestration loop  ◀────┼──▶  Ollama / Anthropic /
-        SSE chat          │        │         ▲          │        OpenAI / Google
+   Angular console        │      TicketAssistant.Api     │        LLM (IChatClient)
+  http://localhost:4200  ─┼─▶  Orchestration loop  ◀────┼──▶  Ollama / Anthropic /
+   SSE chat + Bearer      │        │         ▲          │        OpenAI / Google
                           │        ▼         │          │
                           │   ITicketProvider (abstraction)
                           └────────┼─────────────────────┘
-                                   │ REST + X-User-Id
-                                   ▼
-                          ┌─────────────────────────────┐
-                          │       TicketingMock.Api      │   stands in for a real
-                          │   in-memory tickets + board  │   Jira/Zendesk/etc.
-                          │   http://localhost:5090      │
-                          └─────────────────────────────┘
+                    mock: REST     │      Jira: OAuth (per-user token)
+                          ▼        │        ▼
+      ┌─────────────────────────┐  │  ┌──────────────────────────┐
+      │     TicketingMock.Api    │  │  │   api.atlassian.com       │
+      │  in-memory tickets+board │  │  │   real Jira Cloud site    │
+      │  http://localhost:5090   │  │  └──────────────────────────┘
+      └─────────────────────────┘  └── each user connects via a login popup
 ```
 
-Two ASP.NET Core (.NET 10) services:
+Three services (two ASP.NET Core .NET 10 + one Angular app):
 
 | Project | What it is |
 | --- | --- |
-| **`src/TicketAssistant.Api`** | The assistant: chat endpoints, the LLM tool-calling loop, and the ticket-provider abstraction. |
+| **`src/TicketAssistant.Api`** | The assistant: chat endpoints, the LLM tool-calling loop, the ticket-provider abstraction, and the auth layer (bearer sessions + Jira OAuth). |
 | **`src/TicketingMock.Api`** | A stand-in "external ticketing system" (Jira/Zendesk-like) with an in-memory store, REST API, and a live board UI — so you can watch tickets land in a separate app. |
+| **`src/web`** | The Angular front-end console. |
 
 ### Inside `TicketAssistant.Api`
 
@@ -80,13 +81,18 @@ Two ASP.NET Core (.NET 10) services:
   - `OrchestrationEvent.cs` — the events streamed to the browser (assistant text/deltas,
     tool ran, confirmation required, replace-streamed-text).
 - **`Providers/`** — `ITicketProvider` (the backend seam) and its implementations:
-  `HttpTicketProvider` (calls the mock over REST), `InMemoryTicketProvider` (offline stub),
-  and `UserIdForwardingHandler` (forwards the user id to the backend).
+  `HttpTicketProvider` (calls the mock over REST), `JiraTicketProvider` (a real Jira Cloud site
+  via per-user OAuth — see [Connecting a real Jira](#connecting-a-real-jira-jira-cloud-per-user-oauth)),
+  `InMemoryTicketProvider` (offline stub), and `UserIdForwardingHandler` (forwards the session's
+  user id to the mock).
+- **`Auth/`** — the identity layer: opaque bearer sessions (`SessionStore` / `CurrentSession`)
+  that replace the old `X-User-Id` header, and the Jira OAuth flow (`JiraOAuthClient`,
+  `JiraAccessTokenResolver`, `JiraAuthEndpoints`) that logs each user into their own Jira.
 - **`Models/`** — the canonical ticket model shared across the app.
-- **`wwwroot/index.html`** — a minimal browser chat console for testing: streams SSE,
-  renders Markdown, links ticket IDs to the board, shows the editable confirmation cards,
-  and hosts the user / provider / model / GPU-CPU switchers. A proper Angular frontend is
-  planned but not built yet.
+- **`wwwroot/index.html`** — a minimal single-file chat console kept for quick API testing.
+- **`src/web`** — the **Angular console** (`ng` app): the real front-end, with streaming chat,
+  editable confirmation cards, the provider / model / GPU-CPU switchers, and the Jira connect
+  UI. Runs at <http://localhost:4200>.
 
 ## Running it
 
@@ -128,8 +134,9 @@ podman compose up -d          # or: docker compose up -d
 
 Then open:
 
-- **Chat console** → <http://localhost:5080/>
+- **Angular console** (the front-end) → <http://localhost:4200/>
 - **Ticket board** (the "external" system) → <http://localhost:5090/>
+- **Single-file test console** (quick API poke) → <http://localhost:5080/>
 - **API reference (Scalar)** → <http://localhost:5080/scalar/v1>
 
 Try: *"Create a ticket: the login page returns a 500 error when I submit."* — the assistant
@@ -237,6 +244,9 @@ dotnet run --project src/TicketingMock.Api     # ticket backend on :5090
 dotnet run --project src/TicketAssistant.Api   # assistant on :5080
 ```
 
+For the Angular console you'll also need Node 20+; then `cd src/web && npm install && npm start`
+serves it on :4200. (The single-file console at <http://localhost:5080/> needs no Node.)
+
 ## Configuration
 
 Set via `appsettings.json`, environment variables, or `.env` (see `.env.example`).
@@ -247,18 +257,74 @@ Set via `appsettings.json`, environment variables, or `.env` (see `.env.example`
 | `Ollama:Models` | Space-separated local models (need tool-calling support): the **first is the default**, all are auto-downloaded and offered in the console's dropdown | `qwen2.5:3b qwen2.5:1.5b` |
 | `Anthropic/OpenAI/Google :ApiKey` | Key for the chosen hosted provider | — |
 | `Anthropic/OpenAI/Google :Model` | Model for that provider | `claude-sonnet-5` / `gpt-4o-mini` / `gemini-flash-latest` |
-| `Tickets:Backend` | `Http` (the mock) \| `InMemory` (offline stub) | `Http` |
+| `Tickets:Backend` | `Http` (the mock) \| `Jira` (real Jira Cloud via per-user OAuth, see below) \| `InMemory` (offline stub) | `Http` |
+| `Atlassian:ClientId` / `:ClientSecret` | OAuth 2.0 (3LO) app credentials (required for `Jira`) | — |
+| `Atlassian:RedirectUri` / `:FrontendOrigin` | OAuth callback URL and the console's origin | `…:5080/api/auth/jira/callback` / `…:4200` |
+| `Tickets:Jira:ProjectKey` | Project new tickets land in / reads are scoped to (required for `Jira`); also `:IssueType` / `:ScopeToReporter` | — |
 | `OLLAMA_GPU_DEVICE` (.env, compose only) | Device handed to the Ollama container; the up scripts set it automatically | empty = CPU |
 
 Only Ollama runs with no API key. `qwen3:4b` / `qwen3:8b` are heavier local alternatives with
 more reliable tool calling. All of these are defaults — the console's switchers override the
 provider, model, and GPU/CPU choice per request without touching configuration.
 
+### Connecting a real Jira (Jira Cloud, per-user OAuth)
+
+The `ITicketProvider` seam means a real backend is a drop-in: `JiraTicketProvider` speaks to
+Jira Cloud's REST v3 API, and the orchestration loop, tools, and console are unchanged. Rather
+than one shared token, each user **logs into their own Jira** through an OAuth popup, and the
+assistant then acts as that account.
+
+**1. Register an OAuth 2.0 (3LO) app** at
+[developer.atlassian.com → your apps → Create → OAuth 2.0 integration](https://developer.atlassian.com/console/myapps/):
+- Add the **Jira API** permission with scopes
+  `read:jira-work`, `write:jira-work`, `read:jira-user`, and `offline_access`.
+- Under **Authorization → OAuth 2.0 (3LO)**, set the callback URL to
+  `http://localhost:5080/api/auth/jira/callback`.
+- Copy the app's **Client ID** and **Secret**.
+
+**2. Fill in `.env`** (copied from `.env.example`):
+```dotenv
+TICKETS_BACKEND=Jira
+ATLASSIAN_CLIENT_ID=<your client id>
+ATLASSIAN_CLIENT_SECRET=<your client secret>
+TICKETS_JIRA_PROJECT_KEY=SUP
+```
+
+**3. Run** `./up.sh` (or `.\up.ps1`), open the console at **http://localhost:4200**, and click
+**Connect Jira**. A popup walks you through Atlassian's login/consent; once it closes you're
+connected, and "create a ticket for…" lands a real issue in your project — its id linking to
+`…/browse/KEY` on your site.
+
+How it works: the popup returns to the API, which exchanges the code for tokens and stores them
+**server-side**, attached to your session. The browser only ever holds an opaque bearer session
+id; the Jira tokens (and their refresh) never leave the server. See
+[`Auth/`](src/TicketAssistant.Api/Auth) for the flow.
+
+What the provider maps for you: plain text ↔ **ADF** (Jira's rich body format) for descriptions
+and comments; the app's priorities ↔ Jira's `Highest…Lowest`; a status change ↔ the matching
+**workflow transition** (Jira won't let you set a status directly); an assignee name/email ↔ a
+Jira `accountId` via user search; and "related" tickets ↔ best-effort *Relates* issue links.
+
+Worth knowing:
+
+- **Genuinely per-user.** Each session acts as its own logged-in account, so `ScopeToReporter`
+  (default `true`) means "only tickets you raised". Set `TICKETS_JIRA_SCOPE_TO_REPORTER=false`
+  to browse the whole project.
+- **Status transitions depend on your workflow.** A status change only works if the ticket's
+  current status has a transition reaching the target; otherwise you get a clear error naming
+  the target. `Blocked`/`Closed` need a workflow that actually has such states.
+- **Permissions.** The logged-in account needs Create, Transition, and (for undo) Delete on the
+  project. Undoing a create issues a real Jira delete.
+- This targets **Jira Cloud** (`*.atlassian.net`, API v3 + ADF). Jira Server/Data Center uses
+  different auth and body formats and isn't covered.
+
 ## Caveats (it's a PoC)
 
 - **No persistence** — conversations and tickets live in memory; a restart wipes everything.
-- **Not real auth** — "who the user is" comes from a client-supplied `X-User-Id` header, which
-  is trivially spoofable. It demonstrates data scoping, not security.
+- **Lightweight auth** — identity is an opaque, server-issued bearer session (so you can't act
+  as another user just by naming them), but `POST /api/session` mints one on request with no
+  login, and sessions live in memory. Real Jira access *is* gated by OAuth; the mock's per-user
+  scoping is still a demo, not a security boundary.
 - **Small-model reliability** — a 3B-class local model sometimes writes a tool call as text, replays a
   declined action, or narrates things that didn't happen. The orchestration layer catches and
   corrects the first two (retry, guardrail) and keeps tool calls and confirmation cards
