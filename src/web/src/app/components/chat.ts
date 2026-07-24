@@ -29,7 +29,10 @@ type LogItem =
             } @else {
               <div class="row {{ item.role }}">
                 @if (item.role === 'assistant') { <div class="avatar"></div> }
-                <div class="bubble {{ item.role }}" [innerHTML]="item.html"></div>
+                <div class="bubble-wrap">
+                  @if (item.role === 'assistant') { <span class="ring"><i></i></span> }
+                  <div class="bubble {{ item.role }}" [innerHTML]="item.html"></div>
+                </div>
               </div>
             }
           } @else {
@@ -43,14 +46,20 @@ type LogItem =
         @if (streaming() !== null) {
           <div class="row assistant">
             <div class="avatar"></div>
-            <div class="bubble assistant streaming">{{ streaming() }}</div>
+            <div class="bubble-wrap">
+              <span class="inner"><i></i></span><span class="ring hot"><i></i></span>
+              <div class="bubble assistant streaming">{{ streaming() }}</div>
+            </div>
           </div>
         }
         @if (thinking()) {
           <div class="row assistant">
             <div class="avatar"></div>
-            <div class="bubble assistant thinking">
-              <span class="tdot"></span><span class="tdot"></span><span class="tdot"></span>
+            <div class="bubble-wrap">
+              <span class="inner"><i></i></span><span class="ring hot"><i></i></span>
+              <div class="bubble assistant thinking">
+                <span class="tdot"></span><span class="tdot"></span><span class="tdot"></span>
+              </div>
             </div>
           </div>
         }
@@ -101,16 +110,73 @@ type LogItem =
 
     .bubble {
       padding: 0.72rem 0.95rem; border-radius: 16px; font-size: 0.9rem; line-height: 1.55;
-      max-width: 80%; word-wrap: break-word; overflow-wrap: anywhere;
+      word-wrap: break-word; overflow-wrap: anywhere;
     }
+
+    /* Holds the ring and the bubble as siblings, so the ring can be clipped to the bubble's
+       shape independently of its content. */
+    .bubble-wrap { position: relative; max-width: 80%; min-width: 0; }
+
+    /* Light travelling around the bubble wall: a conic gradient spinning inside a box clipped to
+       the bubble's rounded rectangle and masked to a thin band, so only the border lights up.
+       Every assistant message keeps a calm version of it; the one being generated turns it up. */
+    .ring {
+      position: absolute; inset: 0; z-index: 2; pointer-events: none;
+      border-radius: 18px; overflow: hidden; padding: 1.5px;
+      -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+      mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+      -webkit-mask-composite: xor; mask-composite: exclude;
+      opacity: 0.8; transition: opacity 0.5s var(--ease);
+    }
+    .ring i {
+      position: absolute; top: 50%; left: 50%; width: 250%; aspect-ratio: 1;
+      background: conic-gradient(#4f8bff, #9b5cff, #ff5ca8, #38e1ff, #4f8bff);
+      transform: translate(-50%, -50%);
+      animation: glow-spin 6s linear infinite;    /* idle: clearly alive, just unhurried */
+    }
+    .ring.hot { opacity: 1; }
+    .ring.hot i { animation-duration: 2s; }        /* generating: races */
+
+
+    /* Interior counter-rotating glow — only while generating, so it never sits behind settled
+       text. Clipped to the bubble so it can't bleed outside. */
+    .inner {
+      position: absolute; inset: 0; z-index: 0; pointer-events: none;
+      border-radius: 18px; overflow: hidden; opacity: 0.6;
+    }
+    .inner i {
+      position: absolute; top: 50%; left: 50%; width: 250%; aspect-ratio: 1;
+      background: conic-gradient(#4f8bff, #9b5cff, #ff5ca8, #38e1ff, #4f8bff);
+      filter: blur(22px);
+      transform: translate(-50%, -50%);
+      animation: glow-spin 4s linear infinite reverse;
+    }
+
     .bubble.assistant {
-      background: var(--surface-2); border: 1px solid var(--border);
-      border-top-left-radius: 6px; box-shadow: var(--shadow);
+      position: relative; z-index: 1; border-radius: 18px;
+      background: rgba(17, 19, 27, 0.86);
+      backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+      box-shadow: var(--shadow);
     }
+    /* Let the interior glow read through while the reply is being written. */
+    .bubble.assistant.streaming, .bubble.assistant.thinking { background: rgba(17, 19, 27, 0.72); }
+
+    @media (prefers-reduced-motion: reduce) {
+      .ring i, .inner i, .bubble.user { animation: none; }
+    }
+
+    /* The user's own words: gradient and glow, but no looping motion — they're a reference point,
+       not the thing that's working. The one piece of movement is a one-shot ripple on send. */
+    /* No border here — the user's bubble is lit from within instead: the gradient fill drifts
+       across it while the glow underneath breathes, so it feels alive without competing with the
+       assistant's travelling border. */
     .bubble.user {
-      background: var(--grad); color: #fff; border-top-right-radius: 6px; box-shadow: var(--glow);
+      position: relative; z-index: 1; color: #fff;
+      background: linear-gradient(115deg, #5b5cff, #8b5cff, #e05cff, #8b5cff, #5b5cff);
+      background-size: 300% 100%;
+      border-radius: 18px; border-top-right-radius: 6px;
+      animation: user-flow 14s linear infinite, user-glow 6s ease-in-out infinite;
     }
-    .bubble.streaming::after { content: '▍'; margin-left: 1px; opacity: 0.7; animation: blink 1s steps(2) infinite; }
 
     .bubble p:first-child { margin-top: 0; } .bubble p:last-child { margin-bottom: 0; }
     .bubble a { color: #cdc6ff; text-decoration: underline; text-underline-offset: 2px; }

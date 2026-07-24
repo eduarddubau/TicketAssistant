@@ -50,19 +50,46 @@ body {
   overflow: hidden;
 }
 
-/* aurora glow behind everything */
-body::before {
+/* Aurora behind everything, drifting slowly. Long durations and eased motion keep it ambient —
+   it should read as the room breathing, never as something competing for attention. */
+body::before,
+body::after {
   content: '';
   position: fixed;
   inset: -25% -15% auto -15%;
   height: 85vh;
   z-index: -1;
+  filter: blur(36px);
+  pointer-events: none;
+  will-change: transform;
+}
+
+body::before {
   background:
     radial-gradient(48% 60% at 18% 8%, rgba(124, 108, 255, 0.30), transparent 62%),
     radial-gradient(42% 55% at 82% 0%, rgba(224, 92, 255, 0.22), transparent 60%),
     radial-gradient(46% 52% at 60% 28%, rgba(56, 189, 248, 0.16), transparent 60%);
-  filter: blur(36px);
-  pointer-events: none;
+  animation: aurora-drift 32s ease-in-out infinite;
+}
+
+/* A second, slower layer moving the other way, so the colours interleave instead of sliding
+   as one block. */
+body::after {
+  background:
+    radial-gradient(40% 50% at 70% 12%, rgba(80, 140, 255, 0.20), transparent 62%),
+    radial-gradient(38% 48% at 28% 22%, rgba(255, 92, 168, 0.14), transparent 62%);
+  animation: aurora-drift 47s ease-in-out infinite reverse;
+}
+
+@keyframes aurora-drift {
+  0% { transform: translate3d(0, 0, 0) scale(1); }
+  33% { transform: translate3d(-4%, 2.5%, 0) scale(1.09); }
+  66% { transform: translate3d(4%, -1.5%, 0) scale(1.04); }
+  100% { transform: translate3d(0, 0, 0) scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body::before, body::after { animation: none; }
 }
 
 /* scrollbars */
@@ -91,3 +118,22 @@ button { cursor: pointer; }
   40% { opacity: 1; transform: translateY(-6px); }
 }
 @keyframes blink { 50% { opacity: 0; } }
+
+/* The "AI glow": spin the whole gradient element. transform is animatable everywhere, unlike a
+   conic gradient's angle (which needs a Houdini @property custom property — unreliable on
+   pseudo-elements across browsers). */
+@keyframes glow-spin {
+  from { transform: translate(-50%, -50%) rotate(0deg); }
+  to { transform: translate(-50%, -50%) rotate(360deg); }
+}
+
+/* The user bubble's own life: its gradient fill drifts across it, and the glow beneath it
+   breathes. Two separate properties, so the animations compose instead of fighting. */
+@keyframes user-flow {
+  from { background-position: 0% 50%; }
+  to { background-position: 300% 50%; }
+}
+@keyframes user-glow {
+  0%, 100% { box-shadow: 0 8px 30px -12px rgba(124, 108, 255, 0.55); }
+  50% { box-shadow: 0 12px 42px -10px rgba(214, 92, 255, 0.85); }
+}
