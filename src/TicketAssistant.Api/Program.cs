@@ -6,6 +6,7 @@
 using System.Text.Json;
 using Microsoft.Extensions.AI;
 using Scalar.AspNetCore;
+using TicketAssistant.Api.Auth;
 using TicketAssistant.Api.Orchestration;
 using TicketAssistant.Api.Providers;
 
@@ -18,15 +19,55 @@ builder.Services.AddCors(options => options.AddPolicy(AngularDevCorsPolicy, poli
 
 builder.Services.AddOpenApi();                              // OpenAPI doc for the Scalar UI
 builder.Services.AddHttpContextAccessor();                  // lets the handler below read the request
-builder.Services.AddTransient<UserIdForwardingHandler>();   // forwards X-User-Id to the ticket backend
+builder.Services.AddTransient<UserIdForwardingHandler>();   // forwards the session's user id to the mock
+
+// Identity: the browser carries an opaque, server-issued bearer session (minted at /api/session).
+// SessionStore holds them; CurrentSession resolves "who is this request" from the bearer — the
+// same per-request-header trick ChatClientFactory uses for the LLM. Replaces the old spoofable
+// X-User-Id header, and is where a user's Jira OAuth tokens get attached once they log in.
+builder.Services.AddSingleton<SessionStore>();
+builder.Services.AddSingleton<CurrentSession>();
 
 // Tickets:Backend switches the ITicketProvider implementation. "Http" (default) calls an
 // external ticketing system over REST (the TicketingMock.Api service in this repo);
-// "InMemory" uses the in-process InMemoryTicketProvider stub for offline runs.
+// "Jira" calls a real Jira Cloud site; "InMemory" uses the in-process stub for offline runs.
 var ticketsBackend = builder.Configuration["Tickets:Backend"] ?? "Http";
 if (ticketsBackend.Equals("InMemory", StringComparison.OrdinalIgnoreCase))
 {
     builder.Services.AddSingleton<ITicketProvider, InMemoryTicketProvider>();
+}
+else if (ticketsBackend.Equals("Jira", StringComparison.OrdinalIgnoreCase))
+{
+    var jira = new JiraOptions
+    {
+        ProjectKey = builder.Configuration["Tickets:Jira:ProjectKey"] ?? "",
+        IssueType = builder.Configuration["Tickets:Jira:IssueType"] ?? "Task",
+        ScopeToReporter = !bool.TryParse(builder.Configuration["Tickets:Jira:ScopeToReporter"], out var s) || s
+    };
+    var atlassian = new AtlassianOAuthOptions
+    {
+        ClientId = builder.Configuration["Atlassian:ClientId"] ?? "",
+        ClientSecret = builder.Configuration["Atlassian:ClientSecret"] ?? "",
+        RedirectUri = builder.Configuration["Atlassian:RedirectUri"] ?? "http://localhost:5080/api/auth/jira/callback",
+        Scopes = builder.Configuration["Atlassian:Scopes"] ?? "read:jira-work write:jira-work read:jira-user offline_access",
+        FrontendOrigin = builder.Configuration["Atlassian:FrontendOrigin"] ?? "http://localhost:4200"
+    };
+    if (string.IsNullOrWhiteSpace(atlassian.ClientId) || string.IsNullOrWhiteSpace(atlassian.ClientSecret)
+        || string.IsNullOrWhiteSpace(jira.ProjectKey))
+    {
+        throw new InvalidOperationException(
+            "Tickets:Backend=Jira needs Atlassian:ClientId, Atlassian:ClientSecret and Tickets:Jira:ProjectKey " +
+            "(env: ATLASSIAN_CLIENT_ID / ATLASSIAN_CLIENT_SECRET / TICKETS_JIRA_PROJECT_KEY).");
+    }
+
+    builder.Services.AddSingleton(jira);
+    builder.Services.AddSingleton(atlassian);
+    builder.Services.AddHttpClient<JiraOAuthClient>();          // OAuth token dance + accessible-resources
+    builder.Services.AddSingleton<JiraAccessTokenResolver>();   // per-request token, refreshed as needed
+    // No default auth header — the provider adds each user's bearer token per request and targets
+    // /ex/jira/{cloudId} under this base.
+    builder.Services.AddHttpClient<ITicketProvider, JiraTicketProvider>(
+        c => c.BaseAddress = new Uri("https://api.atlassian.com"));
 }
 else
 {
@@ -67,14 +108,35 @@ if (app.Environment.IsDevelopment())
     app.MapScalarApiReference(); // http://localhost:<port>/scalar/v1
 }
 
-// Where a browser can reach the ticket board. Distinct from Tickets:Http:BaseUrl, which is
-// how *this service* reaches the backend (a container hostname that means nothing to a browser).
-var boardUrl = builder.Configuration["Tickets:BoardUrl"] ?? "http://localhost:5090";
+var isJira = ticketsBackend.Equals("Jira", StringComparison.OrdinalIgnoreCase);
 
-// Start a new chat. Returns its id, the assistant's greeting, and the board URL so the client
-// can turn ticket ids in replies into links.
+// The Jira OAuth popup endpoints only exist when the Jira backend is active.
+if (isJira)
+{
+    app.MapJiraAuth();
+}
+
+// Mint a bearer session for the browser to carry (Authorization: Bearer). The optional name
+// becomes the mock's per-user scope key; for Jira, identity is really the account logged in
+// later via OAuth, so the name is just a label. Unauthenticated by design — a PoC (see caveats).
+app.MapPost("/api/session", (CreateSessionRequest? body, SessionStore sessions) =>
+{
+    var userKey = string.IsNullOrWhiteSpace(body?.Name) ? "guest" : body.Name.Trim();
+    return Results.Ok(new { sessionId = sessions.Create(userKey), userKey });
+});
+
+// Where a browser can reach the ticket board, and how the SPA turns a ticket id into a link. For
+// the mock it's the board SPA (…/#PROJ-1001). For Jira the per-user site URL isn't known until
+// the user logs in, so we send no template — the SPA builds links from /api/auth/jira/status.
+var boardUrl = builder.Configuration["Tickets:BoardUrl"] ?? "http://localhost:5090";
+var ticketUrlTemplate = isJira
+    ? null
+    : builder.Configuration["Tickets:TicketUrlTemplate"] ?? $"{boardUrl}/#{{id}}";
+
+// Start a new chat. Returns its id, the assistant's greeting, and enough context for the client
+// to turn ticket ids into links and to know whether to show the Jira-connect UI.
 app.MapPost("/api/conversations", (ConversationStore store) =>
-    Results.Ok(new { conversationId = store.Create(), greeting = ConversationStore.Greeting, boardUrl }));
+    Results.Ok(new { conversationId = store.Create(), greeting = ConversationStore.Greeting, boardUrl, ticketUrlTemplate, ticketBackend = ticketsBackend }));
 
 // Which LLM providers exist, which one this request would use, and which are actually
 // usable (Ollama always; hosted providers only when their API key is configured) — the
@@ -265,6 +327,9 @@ static async Task WriteSseAsync(
         await response.Body.FlushAsync(ct);
     }
 }
+
+// Request body for POST /api/session: an optional display name to scope the session by.
+internal sealed record CreateSessionRequest(string? Name);
 
 // Request body for POST .../messages: the user's chat text.
 internal sealed record ChatRequest(string Text);
