@@ -1,0 +1,16 @@
+<header class="app-header">
+  <h1>TicketAssistant</h1>
+  <span class="sub">{{ conversation()?.ticketBackend ?? '' }} backend</span>
+</header>
+
+<app-toolbar [ticketBackend]="conversation()?.ticketBackend ?? 'Http'" (userChanged)="onUserChanged($event)" />
+
+@if (isJira() && !jira.status().connected) {
+  <div class="connect-banner">Connect your Jira account (top right) to start creating and managing tickets.</div>
+}
+
+@if (conversation(); as conv) {
+  <app-chat [conversation]="conv" [enabled]="chatEnabled()" />
+} @else {
+  <div class="loading">Starting…</div>
+}
