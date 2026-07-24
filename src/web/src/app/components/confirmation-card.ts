@@ -141,17 +141,41 @@ function specFor(evt: ConfirmationEvent, projects: JiraProject[]): Spec {
     </div>
   `,
   styles: [`
-    .card { border: 1px solid #f0b429; border-radius: 8px; padding: 1rem; margin: 0.5rem 0; background: #2a2416; }
-    h3 { margin: 0 0 0.75rem; font-size: 0.95rem; }
-    .fld { display: block; margin-bottom: 0.6rem; font-size: 0.8rem; color: #cbd2d9; }
-    .fld input, .fld textarea, .fld select { display: block; width: 100%; margin-top: 0.25rem; padding: 0.4rem;
-      border-radius: 6px; border: 1px solid #52606d; background: #1f2933; color: #e4e7eb; box-sizing: border-box; }
-    .actions { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
-    button { padding: 0.4rem 0.9rem; border-radius: 6px; border: 0; cursor: pointer; font-weight: 600; }
-    .approve { background: #f0b429; color: #1f2933; }
-    .approve:disabled { opacity: 0.5; cursor: not-allowed; }
-    .decline { background: #3e4c59; color: #e4e7eb; }
-    .decided { font-size: 0.85rem; color: #9aa5b1; }
+    .card {
+      position: relative; overflow: hidden;
+      border: 1px solid var(--border); border-radius: var(--r);
+      padding: 1rem 1.1rem; background: var(--surface-2);
+      backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+      box-shadow: var(--shadow);
+    }
+    .card::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--grad); }
+
+    h3 { margin: 0 0 0.9rem; font-size: 0.9rem; font-weight: 700; letter-spacing: -0.01em; }
+
+    .fld {
+      display: block; margin-bottom: 0.7rem;
+      font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-faint); font-weight: 700;
+    }
+    .fld input, .fld textarea, .fld select {
+      display: block; width: 100%; margin-top: 0.35rem; padding: 0.55rem 0.65rem;
+      border-radius: var(--r-sm); border: 1px solid var(--border); background: rgba(0, 0, 0, 0.28); color: var(--text);
+      font-size: 0.85rem; font-weight: 400; text-transform: none; letter-spacing: 0; box-sizing: border-box;
+      transition: border-color 0.15s var(--ease), box-shadow 0.15s var(--ease);
+    }
+    .fld input:focus, .fld textarea:focus, .fld select:focus {
+      outline: none; border-color: rgba(124, 108, 255, 0.55); box-shadow: 0 0 0 3px rgba(124, 108, 255, 0.14);
+    }
+    .fld input:disabled, .fld textarea:disabled, .fld select:disabled { opacity: 0.6; }
+    .fld select option, .fld select optgroup { background: #12141c; color: var(--text); }
+
+    .actions { display: flex; gap: 0.55rem; margin-top: 0.95rem; }
+    button { padding: 0.55rem 1.05rem; border-radius: var(--r-sm); border: 0; font-weight: 600; font-size: 0.83rem; transition: 0.15s var(--ease); }
+    .approve { background: var(--grad); color: #fff; box-shadow: var(--glow); }
+    .approve:hover:not(:disabled) { transform: translateY(-1px); filter: brightness(1.06); }
+    .approve:disabled { opacity: 0.5; box-shadow: none; cursor: default; }
+    .decline { background: var(--surface); border: 1px solid var(--border); color: var(--text-dim); }
+    .decline:hover { background: var(--surface-2); color: var(--text); }
+    .decided { font-size: 0.83rem; color: var(--text-dim); font-weight: 600; }
   `],
 })
 export class ConfirmationCard implements OnInit {
