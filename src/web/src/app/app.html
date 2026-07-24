@@ -17,13 +17,13 @@
 @if (jiraEnabled() && !jira.status().connected) {
   <div class="connect-banner">
     <span class="dot-pulse"></span>
-    Connect your Jira account (top right) to fold your Jira tickets and projects into the conversation.
+    Connect Jira (top right) to fold in your Jira tickets and projects — chatting works without it.
   </div>
 }
 
 <main class="stage">
   @if (conversation(); as conv) {
-    <app-chat [conversation]="conv" [enabled]="chatEnabled()" />
+    <app-chat [conversation]="conv" />
   } @else {
     <div class="loading">
       <span class="l-dot"></span><span class="l-dot"></span><span class="l-dot"></span>

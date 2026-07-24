@@ -24,8 +24,9 @@ export class App implements OnInit {
 
   readonly conversation = signal<ConversationInfo | null>(null);
 
+  // Whether the Jira backend is in play (drives the optional connect prompt). Chat itself is
+  // never gated on it — the other backends (the mock) work without any login.
   readonly jiraEnabled = computed(() => this.conversation()?.jiraEnabled ?? false);
-  readonly chatEnabled = computed(() => !this.jiraEnabled() || this.jira.status().connected);
 
   async ngOnInit(): Promise<void> {
     await this.session.ensure();

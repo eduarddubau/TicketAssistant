@@ -59,7 +59,7 @@ type LogItem =
 
     <div class="composer-wrap">
       <div class="col">
-        @if (!started() && enabled) {
+        @if (!started()) {
           <div class="suggestions">
             @for (s of suggestions; track s) {
               <button class="chip" (click)="useSuggestion(s)">{{ s }}</button>
@@ -68,9 +68,9 @@ type LogItem =
         }
         <form class="composer" (submit)="send($event)">
           <input [value]="draft()" (input)="draft.set($any($event.target).value)"
-                 [disabled]="!enabled || busy()"
-                 [placeholder]="enabled ? 'Describe an issue, or ask about your tickets…' : 'Connect Jira to start chatting'" />
-          <button class="send" type="submit" [disabled]="!enabled || busy() || !draft().trim()" aria-label="Send">
+                 [disabled]="busy()"
+                 placeholder="Describe an issue, or ask about your tickets…" />
+          <button class="send" type="submit" [disabled]="busy() || !draft().trim()" aria-label="Send">
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M5 12h14M13 6l6 6-6 6"/>
             </svg>
@@ -169,7 +169,6 @@ type LogItem =
 })
 export class Chat implements OnInit, OnDestroy {
   @Input({ required: true }) conversation!: ConversationInfo;
-  @Input() enabled = true;
 
   private readonly api = inject(ApiService);
   private readonly projectsSvc = inject(ProjectsService);
@@ -205,7 +204,7 @@ export class Chat implements OnInit, OnDestroy {
   async send(e?: Event): Promise<void> {
     e?.preventDefault();
     const text = this.draft().trim();
-    if (!text || this.busy() || !this.enabled) return;
+    if (!text || this.busy()) return;
 
     this.started.set(true);
     this.push('user', text, /*raw*/ true);
