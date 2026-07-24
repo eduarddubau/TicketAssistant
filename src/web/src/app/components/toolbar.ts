@@ -36,8 +36,10 @@ import { ProjectsService } from '../services/projects.service';
 
       <div class="ctl">
         <span class="lbl">Compute</span>
+        <!-- "GPU" is the empty value: no override, which means Ollama uses the GPU when one is
+             attached and falls back to CPU when not. "CPU" forces CPU-only inference. -->
         <select class="sel" [value]="llm.compute()" (change)="llm.setCompute($any($event.target).value)">
-          <option value="">Auto</option>
+          <option value="">GPU</option>
           <option value="cpu">CPU</option>
         </select>
       </div>
@@ -80,25 +82,55 @@ import { ProjectsService } from '../services/projects.service';
     :host { display: block; }
     .bar { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; justify-content: flex-end; }
 
+    /* A fixed height plus a shared line-height on every child is what actually lines the tiny
+       uppercase label up with the input/select text — flex centring alone leaves them optically
+       off, because form controls and spans have different intrinsic line boxes. */
+    /* Height comes from padding, not a fixed value: baseline alignment inside a fixed-height flex
+       box packs the content to the top. With both control types on equal explicit heights, padding
+       sizing still yields identical pills. */
     .ctl {
-      display: flex; align-items: center; gap: 0.45rem;
-      padding: 0.3rem 0.6rem;
+      display: flex; align-items: baseline; gap: 0.45rem;
+      padding: 0.5rem 0.7rem;
       background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-full);
       transition: border-color 0.15s var(--ease), background 0.15s var(--ease);
     }
     .ctl:focus-within { border-color: var(--border-strong); background: var(--surface-2); }
-    .lbl { font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.07em; color: var(--text-faint); font-weight: 700; }
-    .inp, .sel { background: transparent; border: 0; color: var(--text); font-size: 0.8rem; padding: 0; }
+    /* With the label and both control types on equal, explicit line boxes, centring puts every
+       string's optical centre on the pill's centre — which keeps the label level with its value
+       *and* the input pills level with the select pills. */
+    .lbl {
+      font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.07em;
+      color: var(--text-faint); font-weight: 700;
+      line-height: 1; white-space: nowrap;
+    }
+    /* Inputs and selects must share an explicit height: a select's UA box is taller than an
+       input's, which under baseline alignment pushed the select pills' text ~2.5px higher than
+       the input pills'. Equal boxes give both the same baseline position inside the pill. */
+    .inp, .sel {
+      background: transparent; border: 0; color: var(--text); font-size: 0.8rem;
+      padding: 0; margin: 0; line-height: 1.15; height: 1.15rem;
+    }
     .inp:focus, .sel:focus { outline: none; }
     .inp.model { width: 8.5rem; }
     .inp.user { width: 5rem; }
-    .sel { cursor: pointer; }
+    /* A native select won't honour line-height (the UA lays out its own inner box), which is what
+       kept the dropdowns sitting low next to their labels. Strip the native appearance and draw
+       the caret ourselves, so the text uses our line box like every other control. */
+    .sel {
+      cursor: pointer;
+      appearance: none; -webkit-appearance: none; -moz-appearance: none;
+      padding-right: 1.05rem;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5 6 8l3.5-3.5' fill='none' stroke='%239aa5b1' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right center;
+      background-size: 11px 11px;
+    }
     .sel option { background: #12141c; color: var(--text); }
 
     .badge {
       display: flex; align-items: center; gap: 0.4rem;
-      font-size: 0.68rem; font-weight: 700; letter-spacing: 0.02em;
-      padding: 0.34rem 0.62rem; border-radius: var(--r-full);
+      font-size: 0.68rem; font-weight: 700; letter-spacing: 0.02em; line-height: 1;
+      height: 34px; padding: 0 0.7rem; border-radius: var(--r-full);
       background: var(--surface); border: 1px solid var(--border); color: var(--text-dim);
     }
     .badge.gpu { background: rgba(52, 211, 153, 0.12); border-color: rgba(52, 211, 153, 0.35); color: #7ff0c4; }
@@ -108,8 +140,8 @@ import { ProjectsService } from '../services/projects.service';
 
     .cta {
       display: flex; align-items: center; gap: 0.45rem;
-      padding: 0.46rem 0.9rem; border: 0; border-radius: var(--r-full);
-      color: #fff; font-weight: 600; font-size: 0.8rem;
+      height: 34px; padding: 0 0.95rem; border: 0; border-radius: var(--r-full);
+      color: #fff; font-weight: 600; font-size: 0.8rem; line-height: 1;
       background: var(--grad); box-shadow: var(--glow);
       transition: transform 0.15s var(--ease), box-shadow 0.2s var(--ease), filter 0.2s;
     }
@@ -117,13 +149,17 @@ import { ProjectsService } from '../services/projects.service';
     .cta:active { transform: translateY(0); }
     .cta:disabled { opacity: 0.65; cursor: default; }
 
-    .ghost { padding: 0.42rem 0.75rem; border-radius: var(--r-full); background: var(--surface); border: 1px solid var(--border); color: var(--text-dim); font-size: 0.78rem; transition: 0.15s var(--ease); }
+    .ghost {
+      display: flex; align-items: center; height: 34px; padding: 0 0.85rem;
+      border-radius: var(--r-full); background: var(--surface); border: 1px solid var(--border);
+      color: var(--text-dim); font-size: 0.78rem; line-height: 1; transition: 0.15s var(--ease);
+    }
     .ghost:hover { background: var(--surface-2); color: var(--text); border-color: var(--border-strong); }
 
     .jira-pill {
       display: flex; align-items: center; gap: 0.4rem;
-      font-size: 0.75rem; color: #cfeadd;
-      padding: 0.36rem 0.65rem; border-radius: var(--r-full);
+      font-size: 0.75rem; color: #cfeadd; line-height: 1;
+      height: 34px; padding: 0 0.75rem; border-radius: var(--r-full);
       background: rgba(52, 211, 153, 0.1); border: 1px solid rgba(52, 211, 153, 0.28);
     }
     .jira-pill .on { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 8px var(--ok); }

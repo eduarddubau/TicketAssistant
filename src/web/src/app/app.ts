@@ -34,6 +34,11 @@ export class App implements OnInit {
     await this.newConversation();
   }
 
+  /** Start a fresh conversation, clearing the transcript. */
+  async newChat(): Promise<void> {
+    await this.newConversation();
+  }
+
   // A change of user is a change of identity — mint a fresh session and start a clean conversation
   // so nothing leaks across users.
   async onUserChanged(name: string): Promise<void> {
