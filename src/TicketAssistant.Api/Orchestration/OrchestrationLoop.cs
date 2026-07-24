@@ -446,6 +446,10 @@ public sealed class OrchestrationLoop(
                 var result = await InvokeToolAsync(tool, call, ct);
                 var failed = result is string s && s.StartsWith("Error:", StringComparison.Ordinal);
                 logger.LogInformation("Ran {Tool} (succeeded: {Succeeded})", call.Name, !failed);
+                if (failed)
+                {
+                    logger.LogWarning("Tool {Tool} returned an error: {Error}", call.Name, result);
+                }
                 messages.Add(new ChatMessage(ChatRole.Tool, [new FunctionResultContent(call.CallId, result)]));
                 yield return new OrchestrationEvent.ToolExecuted(call.Name, Succeeded: !failed);
             }

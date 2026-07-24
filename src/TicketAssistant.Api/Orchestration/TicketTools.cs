@@ -39,6 +39,16 @@ public static class TicketTools
     public static bool RequiresConfirmation(string toolName) => ConfirmationRequiredTools.Contains(toolName);
 
     /// <summary>
+    /// Parses a loose string into an enum, case-insensitively, returning null for empty or
+    /// unrecognized values instead of throwing — so a weak model's "open"/"URGENT"/"" doesn't
+    /// crash a read tool during argument binding.
+    /// </summary>
+    private static TEnum? ParseEnum<TEnum>(string? value) where TEnum : struct, Enum =>
+        !string.IsNullOrWhiteSpace(value) && Enum.TryParse<TEnum>(value, ignoreCase: true, out var parsed)
+            ? parsed
+            : null;
+
+    /// <summary>
     /// Wraps each provider method as an AIFunction the model can call. AIFunctionFactory.Create
     /// inspects the lambda's parameters to generate the schema the model sees, so parameter
     /// names/types and the description text are effectively the model's API documentation.
@@ -79,8 +89,11 @@ public static class TicketTools
                               "or priority use list_tickets instead."),
 
             AIFunctionFactory.Create(
-                (TicketStatus? status, TicketPriority? priority, CancellationToken ct) =>
-                    provider.ListTicketsAsync(status, priority, ct),
+                // status/priority are taken as loose strings and parsed case-insensitively rather
+                // than as strict enums: a small model that sends "open" or an empty string would
+                // otherwise fail argument binding before the tool even runs.
+                (string? status, string? priority, CancellationToken ct) =>
+                    provider.ListTicketsAsync(ParseEnum<TicketStatus>(status), ParseEnum<TicketPriority>(priority), ct),
                 name: "list_tickets",
                 description: "List the user's tickets, optionally filtered by status (Open, InProgress, " +
                               "Blocked, Resolved, Closed) and/or priority (Low, Medium, High, Urgent). " +
