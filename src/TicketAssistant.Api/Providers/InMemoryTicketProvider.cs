@@ -15,6 +15,10 @@ public sealed class InMemoryTicketProvider : ITicketProvider
 
     public string Name => "in-memory";
 
+    // A single synthetic project so this backend is a selectable create target (ids are PROJ-*).
+    public Task<IReadOnlyList<TicketProject>> ListProjectsAsync(CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyList<TicketProject>>([new TicketProject("PROJ", "In-memory board")]);
+
     public Task<CanonicalTicket> GetTicketAsync(string ticketId, CancellationToken ct = default)
     {
         if (!_tickets.TryGetValue(ticketId, out var ticket))

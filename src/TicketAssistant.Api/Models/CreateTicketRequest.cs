@@ -4,6 +4,11 @@ public sealed class CreateTicketRequest
 {
     public required string Title { get; init; }
     public string? Description { get; init; }
+
+    /// <summary>Which project to create the ticket in (backends with projects, e.g. Jira). Null =
+    /// use the backend's default. The key, e.g. "SUP".</summary>
+    public string? Project { get; init; }
+
     public TicketPriority Priority { get; init; } = TicketPriority.Medium;
     public string? Assignee { get; init; }
     public IReadOnlyList<string> Labels { get; init; } = [];

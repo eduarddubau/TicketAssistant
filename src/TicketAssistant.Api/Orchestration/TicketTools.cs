@@ -39,6 +39,16 @@ public static class TicketTools
     public static bool RequiresConfirmation(string toolName) => ConfirmationRequiredTools.Contains(toolName);
 
     /// <summary>
+    /// Parses a loose string into an enum, case-insensitively, returning null for empty or
+    /// unrecognized values instead of throwing — so a weak model's "open"/"URGENT"/"" doesn't
+    /// crash a read tool during argument binding.
+    /// </summary>
+    private static TEnum? ParseEnum<TEnum>(string? value) where TEnum : struct, Enum =>
+        !string.IsNullOrWhiteSpace(value) && Enum.TryParse<TEnum>(value, ignoreCase: true, out var parsed)
+            ? parsed
+            : null;
+
+    /// <summary>
     /// Wraps each provider method as an AIFunction the model can call. AIFunctionFactory.Create
     /// inspects the lambda's parameters to generate the schema the model sees, so parameter
     /// names/types and the description text are effectively the model's API documentation.
@@ -79,13 +89,25 @@ public static class TicketTools
                               "or priority use list_tickets instead."),
 
             AIFunctionFactory.Create(
-                (TicketStatus? status, TicketPriority? priority, CancellationToken ct) =>
-                    provider.ListTicketsAsync(status, priority, ct),
+                // status/priority are taken as loose strings and parsed case-insensitively rather
+                // than as strict enums: a small model that sends "open" or an empty string would
+                // otherwise fail argument binding before the tool even runs.
+                (string? status, string? priority, CancellationToken ct) =>
+                    provider.ListTicketsAsync(ParseEnum<TicketStatus>(status), ParseEnum<TicketPriority>(priority), ct),
                 name: "list_tickets",
                 description: "List the user's tickets, optionally filtered by status (Open, InProgress, " +
                               "Blocked, Resolved, Closed) and/or priority (Low, Medium, High, Urgent). " +
                               "Use this for questions like 'my open tickets', 'anything urgent?', or " +
-                              "'all my tickets' — omit both filters to list everything."),
+                              "'all my tickets' — omit both filters to list everything. Results can span " +
+                              "several projects."),
+
+            AIFunctionFactory.Create(
+                (CancellationToken ct) => provider.ListProjectsAsync(ct),
+                name: "list_projects",
+                description: "List the projects the user can file tickets in — each has a key (e.g. 'SUP') " +
+                              "and a name (e.g. 'Support'). Use this to find the right project key before " +
+                              "creating a ticket in a particular area, or to answer 'what projects do I have?'. " +
+                              "Backends without a project concept return an empty list."),
 
             AIFunctionFactory.Create(
                 // createAnyway is read by OrchestrationLoop (not used here): the loop blocks a
@@ -93,13 +115,14 @@ public static class TicketTools
                 // relatedTo is filled in by OrchestrationLoop when a near-duplicate is created
                 // anyway, so the two tickets stay linked rather than drifting apart silently.
                 (string title, string? description, TicketPriority priority,
-                 string? assignee = null, string[]? labels = null, bool createAnyway = false,
-                 string[]? relatedTo = null, CancellationToken ct = default) =>
+                 string? project = null, string? assignee = null, string[]? labels = null,
+                 bool createAnyway = false, string[]? relatedTo = null, CancellationToken ct = default) =>
                     provider.CreateTicketAsync(
                         new CreateTicketRequest
                         {
                             Title = title,
                             Description = description,
+                            Project = project,
                             Priority = priority,
                             Assignee = assignee,
                             Labels = labels ?? [],
@@ -109,11 +132,14 @@ public static class TicketTools
                 name: CreateTicketToolName,
                 description: "Create a new ticket. Only call this once you have a title, a description, " +
                               "and a priority — if any is missing, ask the user for it rather than guessing. " +
-                              "assignee and labels are optional. If a ticket for the same issue already " +
-                              "exists for this user, you'll be told and asked to check with them first; set " +
-                              "createAnyway=true only after the user explicitly chooses to create a separate " +
-                              "new ticket. The user approves this in a confirmation card before it runs — a " +
-                              "returned result means they already approved and the ticket is fully created."),
+                              "project is the project key to create it in (e.g. 'SUP'); when the user could " +
+                              "have several, call list_projects and use the right one, or omit it to let the " +
+                              "user pick on the confirmation card. assignee and labels are optional. If a " +
+                              "ticket for the same issue already exists for this user, you'll be told and asked " +
+                              "to check with them first; set createAnyway=true only after the user explicitly " +
+                              "chooses to create a separate new ticket. The user approves this in a confirmation " +
+                              "card before it runs — a returned result means they already approved and the " +
+                              "ticket is fully created."),
 
             AIFunctionFactory.Create(
                 (string ticketId, TicketStatus status, CancellationToken ct) =>

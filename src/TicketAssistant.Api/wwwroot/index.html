@@ -98,7 +98,9 @@
     const providerSelect = document.getElementById('provider');
     const modelInput = document.getElementById('model');
     let conversationId = null;
-    let TICKET_BOARD = 'http://localhost:5090';   // replaced by the server's value on connect
+    // Template for turning a ticket id into a link; "{id}" is substituted. The server sends
+    // the real one on connect (…/#{id} for the mock board, …/browse/{id} for Jira).
+    let TICKET_URL_TEMPLATE = 'http://localhost:5090/#{id}';
 
     // Identifies the current user; the API scopes tickets to whoever this is. Persisted so
     // a reload keeps the same identity; editable so you can switch users to test isolation.
@@ -225,13 +227,26 @@
     }
     refreshComputeStatus();
 
-    // fetch wrapper that tags every request with the current user and chosen model.
+    // fetch wrapper that tags every request with the bearer session and chosen model.
     function api(url, options = {}) {
-      const headers = { ...(options.headers || {}), 'X-User-Id': userId };
+      const headers = { ...(options.headers || {}) };
+      if (sessionId) headers['Authorization'] = 'Bearer ' + sessionId;
       if (llmProvider) headers['X-Llm-Provider'] = llmProvider;
       if (llmModel) headers['X-Llm-Model'] = llmModel;
       if (llmCompute) headers['X-Ollama-Compute'] = llmCompute;
       return fetch(url, { ...options, headers });
+    }
+
+    // Mints a server-side session for the current user name and remembers its bearer id. The
+    // name scopes tickets on the mock; identity is otherwise the opaque, unguessable session id.
+    let sessionId = null;
+    async function ensureSession() {
+      const res = await fetch('/api/session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: userId })
+      });
+      sessionId = (await res.json()).sessionId;
     }
 
     // Populate the switcher from the server's list, defaulting to whatever it currently uses.
@@ -319,7 +334,7 @@
         while ((m = TICKET_ID.exec(node.textContent)) !== null) {
           frag.append(node.textContent.slice(last, m.index));
           const a = document.createElement('a');
-          a.href = TICKET_BOARD + '/#' + m[1];
+          a.href = TICKET_URL_TEMPLATE.replace('{id}', m[1]);
           a.target = '_blank';
           a.rel = 'noopener';
           a.textContent = m[1];
@@ -339,7 +354,7 @@
       log.innerHTML = '';
       add('tool', 'conversation ' + conversationId + ' · user: ' + userId);
       // The server supplies the opening message, so every frontend greets identically.
-      if (data.boardUrl) TICKET_BOARD = data.boardUrl;
+      if (data.ticketUrlTemplate) TICKET_URL_TEMPLATE = data.ticketUrlTemplate;
       if (data.greeting) add('assistant', data.greeting);
     }
 
@@ -588,18 +603,19 @@
       lock(false);
     });
 
-    function switchUser() {
+    async function switchUser() {
       const next = userInput.value.trim() || 'alice';
       userInput.value = next;
       if (next === userId) return;
       userId = next;
       localStorage.setItem('ta-user', userId);
-      newConversation();   // new context so history doesn't leak across users
+      await ensureSession();   // fresh session for the new identity
+      newConversation();       // new context so history doesn't leak across users
     }
     userInput.addEventListener('change', switchUser);
 
     document.getElementById('reset').onclick = newConversation;
-    loadProviders().then(newConversation);
+    loadProviders().then(ensureSession).then(newConversation);
   </script>
 </body>
 </html>

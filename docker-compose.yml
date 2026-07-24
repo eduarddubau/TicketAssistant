@@ -19,12 +19,41 @@ services:
       Anthropic__ApiKey: ${ANTHROPIC_API_KEY:-}
       OpenAI__ApiKey: ${OPENAI_API_KEY:-}
       Google__ApiKey: ${GOOGLE_API_KEY:-}
-      # Where the assistant sends ticket operations (the ticketing-mock service below).
-      Tickets__Backend: Http
+      # Which ticket backends the assistant drives — space/comma separated, used together. Any of
+      # Http (the ticketing-mock service below), Jira (real Jira Cloud via per-user OAuth login —
+      # fill in the ATLASSIAN_* vars in .env), InMemory (offline stub). e.g. "Http Jira" for both.
+      Tickets__Backends: ${TICKETS_BACKENDS:-Http}
       Tickets__Http__BaseUrl: http://ticketing-mock:8080
+      Tickets__Jira__ProjectKey: ${TICKETS_JIRA_PROJECT_KEY:-}
+      Tickets__Jira__IssueType: ${TICKETS_JIRA_ISSUE_TYPE:-Task}
+      Tickets__Jira__ScopeToReporter: ${TICKETS_JIRA_SCOPE_TO_REPORTER:-true}
+      # Atlassian OAuth 2.0 (3LO) app — only read when Tickets__Backend=Jira. The redirect and
+      # frontend origin default to this compose's host ports.
+      Atlassian__ClientId: ${ATLASSIAN_CLIENT_ID:-}
+      Atlassian__ClientSecret: ${ATLASSIAN_CLIENT_SECRET:-}
+      Atlassian__RedirectUri: ${ATLASSIAN_REDIRECT_URI:-http://localhost:5080/api/auth/jira/callback}
+      Atlassian__FrontendOrigin: ${ATLASSIAN_FRONTEND_ORIGIN:-http://localhost:4200}
     depends_on:
       - ollama
       - ticketing-mock
+
+  # The Angular console (dev server). Talks to the API at http://localhost:5080 from the browser
+  # (CORS on the API allows :4200). Source is bind-mounted for live editing; node_modules comes
+  # from the image so a fresh clone needs no host Node.
+  web:
+    build:
+      context: ./src/web
+    ports:
+      - "4200:4200"
+    volumes:
+      - ./src/web:/app
+      - /app/node_modules
+    # SELinux hosts (Fedora/RHEL) block bind-mount access unless labeling is disabled for the
+    # container (same as the ollama service). Harmless elsewhere.
+    security_opt:
+      - label=disable
+    depends_on:
+      - api
 
   ollama:
     image: ollama/ollama:latest
