@@ -92,7 +92,9 @@ public static class TicketTools
                 // status/priority are taken as loose strings and parsed case-insensitively rather
                 // than as strict enums: a small model that sends "open" or an empty string would
                 // otherwise fail argument binding before the tool even runs.
-                (string? status, string? priority, CancellationToken ct) =>
+                // Defaults matter as much as nullability here: a parameter without one is treated
+                // as *required*, so a model omitting it fails argument binding before the tool runs.
+                (string? status = null, string? priority = null, CancellationToken ct = default) =>
                     provider.ListTicketsAsync(ParseEnum<TicketStatus>(status), ParseEnum<TicketPriority>(priority), ct),
                 name: "list_tickets",
                 description: "List the user's tickets, optionally filtered by status (Open, InProgress, " +
@@ -150,7 +152,7 @@ public static class TicketTools
                               "change is fully applied."),
 
             AIFunctionFactory.Create(
-                (string ticketId, DateTimeOffset? dueAt, CancellationToken ct) =>
+                (string ticketId, DateTimeOffset? dueAt = null, CancellationToken ct = default) =>
                     provider.SetDueDateAsync(ticketId, dueAt, ct),
                 name: SetDueDateToolName,
                 description: "Set when a ticket is due, as a date (e.g. 2026-08-01). Omit dueAt to clear " +
@@ -158,7 +160,7 @@ public static class TicketTools
                               "a returned result means they already approved and the date is set."),
 
             AIFunctionFactory.Create(
-                (string ticketId, string? assignee, CancellationToken ct) =>
+                (string ticketId, string? assignee = null, CancellationToken ct = default) =>
                     provider.AssignTicketAsync(ticketId, assignee, ct),
                 name: AssignTicketToolName,
                 description: "Assign a ticket to someone, or reassign it. Pass an empty assignee to " +
