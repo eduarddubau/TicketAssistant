@@ -1,34 +1,51 @@
 import { Component, EventEmitter, Input, OnInit, Output, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { OrchestrationEvent } from '../models';
+import { JiraProject, OrchestrationEvent } from '../models';
 
 type ConfirmationEvent = Extract<OrchestrationEvent, { type: 'confirmation_required' }>;
 export interface Decision { approved: boolean; callId: string; edits?: Record<string, unknown>; }
 
-interface Field { key: string; label: string; kind: 'text' | 'textarea' | 'select' | 'date'; options?: string[]; required?: boolean; readonly?: boolean; }
+interface Field { key: string; label: string; kind: 'text' | 'textarea' | 'select' | 'date'; options?: string[]; optionLabels?: Record<string, string>; required?: boolean; readonly?: boolean; }
 interface Spec { heading: string; verb: string; fields: Field[]; initial: Record<string, any>; edits: (v: Record<string, any>) => Record<string, unknown>; }
 
 const SEVERITIES = ['Low', 'Medium', 'High', 'Urgent'];
 const STATUSES = ['Open', 'InProgress', 'Blocked', 'Resolved', 'Closed'];
 
 // One editable card per write tool — the same field sets the original console offered, so the
-// user can review and tweak what the model proposed before it runs.
-function specFor(evt: ConfirmationEvent): Spec {
+// user can review and tweak what the model proposed before it runs. When creating and the user
+// has projects (Jira), a project picker is prepended so the ticket lands in the right place.
+function specFor(evt: ConfirmationEvent, projects: JiraProject[]): Spec {
   const a = evt.arguments ?? {};
   const ticket: Field = { key: 'ticketId', label: 'Ticket', kind: 'text', readonly: true };
 
   switch (evt.toolName) {
-    case 'create_ticket':
+    case 'create_ticket': {
+      const fields: Field[] = [
+        { key: 'title', label: 'Title', kind: 'text', required: true },
+        { key: 'description', label: 'Description', kind: 'textarea', required: true },
+        { key: 'priority', label: 'Severity', kind: 'select', options: SEVERITIES },
+      ];
+      if (projects.length) {
+        fields.unshift({
+          key: 'project', label: 'Project', kind: 'select', required: true,
+          options: projects.map((p) => p.key),
+          optionLabels: Object.fromEntries(projects.map((p) =>
+            [p.key, `${p.key} — ${p.name}${p.siteName ? ' · ' + p.siteName : ''}`])),
+        });
+      }
       return {
         heading: '⚠️ Review & confirm new ticket', verb: 'Create ticket',
-        fields: [
-          { key: 'title', label: 'Title', kind: 'text', required: true },
-          { key: 'description', label: 'Description', kind: 'textarea', required: true },
-          { key: 'priority', label: 'Severity', kind: 'select', options: SEVERITIES },
-        ],
-        initial: { title: a['title'] ?? '', description: a['description'] ?? '', priority: a['priority'] ?? 'Medium' },
-        edits: (v) => ({ title: v['title'], description: v['description'], priority: v['priority'] }),
+        fields,
+        initial: {
+          project: a['project'] ?? (projects.length === 1 ? projects[0].key : ''),
+          title: a['title'] ?? '', description: a['description'] ?? '', priority: a['priority'] ?? 'Medium',
+        },
+        edits: (v) => ({
+          title: v['title'], description: v['description'], priority: v['priority'],
+          ...(projects.length ? { project: v['project'] } : {}),
+        }),
       };
+    }
     case 'update_ticket_status':
       return {
         heading: '⚠️ Confirm status change', verb: 'Update status',
@@ -88,7 +105,7 @@ function specFor(evt: ConfirmationEvent): Spec {
             <textarea rows="3" [disabled]="!!f.readonly || decided()" [(ngModel)]="values[f.key]"></textarea>
           } @else if (f.kind === 'select') {
             <select [disabled]="!!f.readonly || decided()" [(ngModel)]="values[f.key]">
-              @for (o of f.options; track o) { <option [value]="o">{{ o }}</option> }
+              @for (o of f.options; track o) { <option [value]="o">{{ f.optionLabels?.[o] || o }}</option> }
             </select>
           } @else {
             <input [type]="f.kind === 'date' ? 'date' : 'text'"
@@ -122,6 +139,7 @@ function specFor(evt: ConfirmationEvent): Spec {
 })
 export class ConfirmationCard implements OnInit {
   @Input({ required: true }) event!: ConfirmationEvent;
+  @Input() projects: JiraProject[] = [];
   @Output() decision = new EventEmitter<Decision>();
 
   spec!: Spec;
@@ -130,7 +148,7 @@ export class ConfirmationCard implements OnInit {
   approvedChoice = false;
 
   ngOnInit(): void {
-    this.spec = specFor(this.event);
+    this.spec = specFor(this.event, this.projects);
     this.values = { ...this.spec.initial };
   }
 

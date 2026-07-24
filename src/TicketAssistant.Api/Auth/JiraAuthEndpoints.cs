@@ -1,4 +1,5 @@
 using System.Text.Json;
+using TicketAssistant.Api.Providers;
 
 namespace TicketAssistant.Api.Auth;
 
@@ -56,15 +57,14 @@ public static class JiraAuthEndpoints
             try
             {
                 var tokens = await oauth.ExchangeCodeAsync(code, ct);
-                var (cloudId, siteUrl) = await oauth.GetAccessibleSiteAsync(tokens.AccessToken, ct);
-                var label = await oauth.GetAccountLabelAsync(tokens.AccessToken, cloudId, ct);
+                var sites = await oauth.GetAccessibleSitesAsync(tokens.AccessToken, ct);
+                var label = await oauth.GetAccountLabelAsync(tokens.AccessToken, sites[0].CloudId, ct);
 
                 session.Jira = new JiraConnection(
                     tokens.AccessToken,
                     tokens.RefreshToken ?? "",
                     DateTimeOffset.UtcNow.AddSeconds(tokens.ExpiresIn),
-                    cloudId,
-                    siteUrl,
+                    sites,
                     label);
 
                 return CallbackPage(origin, true, null);
@@ -76,11 +76,31 @@ public static class JiraAuthEndpoints
             }
         });
 
-        // Whether the current session is connected, and to what — powers the SPA's status badge.
+        // Whether the current session is connected, as whom, and to which sites — powers the SPA's
+        // status badge.
         group.MapGet("/status", (CurrentSession current) =>
         {
             var jira = current.Get()?.Jira;
-            return Results.Ok(new { connected = jira is not null, siteUrl = jira?.SiteUrl, accountEmail = jira?.AccountEmail });
+            return Results.Ok(new
+            {
+                connected = jira is not null,
+                accountEmail = jira?.AccountEmail,
+                sites = jira?.Sites.Select(s => new { s.Name, s.SiteUrl }) ?? []
+            });
+        });
+
+        // The projects the connected user can access, for the "create in…" picker. Backed by the
+        // ticket provider (same call the assistant's list_projects tool uses).
+        group.MapGet("/projects", async (ITicketProvider provider, CancellationToken ct) =>
+        {
+            try
+            {
+                return Results.Ok(await provider.ListProjectsAsync(ct));
+            }
+            catch (JiraNotConnectedException)
+            {
+                return Results.Unauthorized();
+            }
         });
 
         // Disconnect: drop the Jira tokens from the session (the session itself lives on).

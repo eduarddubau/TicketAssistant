@@ -21,6 +21,13 @@ public interface ITicketProvider
     Task<IReadOnlyList<CanonicalTicket>> SearchTicketsAsync(string query, CancellationToken ct = default);
 
     /// <summary>
+    /// The projects the caller can file tickets in, so the assistant can create into any of them
+    /// (and let the user pick). Backends without a project concept return none — the default here.
+    /// </summary>
+    Task<IReadOnlyList<TicketProject>> ListProjectsAsync(CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyList<TicketProject>>([]);
+
+    /// <summary>
     /// List the caller's tickets, optionally narrowed by status and/or priority. This is the
     /// structured counterpart to <see cref="SearchTicketsAsync"/> — use it for "my open
     /// tickets" or "anything urgent", which free-text search cannot answer.

@@ -52,12 +52,12 @@ else if (ticketsBackend.Equals("Jira", StringComparison.OrdinalIgnoreCase))
         Scopes = builder.Configuration["Atlassian:Scopes"] ?? "read:jira-work write:jira-work read:jira-user offline_access",
         FrontendOrigin = builder.Configuration["Atlassian:FrontendOrigin"] ?? "http://localhost:4200"
     };
-    if (string.IsNullOrWhiteSpace(atlassian.ClientId) || string.IsNullOrWhiteSpace(atlassian.ClientSecret)
-        || string.IsNullOrWhiteSpace(jira.ProjectKey))
+    if (string.IsNullOrWhiteSpace(atlassian.ClientId) || string.IsNullOrWhiteSpace(atlassian.ClientSecret))
     {
         throw new InvalidOperationException(
-            "Tickets:Backend=Jira needs Atlassian:ClientId, Atlassian:ClientSecret and Tickets:Jira:ProjectKey " +
-            "(env: ATLASSIAN_CLIENT_ID / ATLASSIAN_CLIENT_SECRET / TICKETS_JIRA_PROJECT_KEY).");
+            "Tickets:Backend=Jira needs Atlassian:ClientId and Atlassian:ClientSecret " +
+            "(env: ATLASSIAN_CLIENT_ID / ATLASSIAN_CLIENT_SECRET). The project is chosen per ticket in the " +
+            "UI; set TICKETS_JIRA_PROJECT_KEY only if you want a fixed default.");
     }
 
     builder.Services.AddSingleton(jira);

@@ -51,7 +51,10 @@ import { JiraService } from '../services/jira.service';
       @if (ticketBackend === 'Jira') {
         <span class="spacer"></span>
         @if (jira.status().connected) {
-          <span class="jira ok">Jira: {{ jira.status().accountEmail || jira.status().siteUrl }}</span>
+          <span class="jira ok">
+            {{ jira.status().accountEmail || 'Connected' }}
+            @if (jira.status().sites?.length) { · {{ jira.status().sites!.length }} site(s) }
+          </span>
           <button (click)="logout()">Disconnect</button>
         } @else {
           <button class="connect" (click)="connect()" [disabled]="connecting()">

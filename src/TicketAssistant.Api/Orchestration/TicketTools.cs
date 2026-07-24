@@ -85,7 +85,16 @@ public static class TicketTools
                 description: "List the user's tickets, optionally filtered by status (Open, InProgress, " +
                               "Blocked, Resolved, Closed) and/or priority (Low, Medium, High, Urgent). " +
                               "Use this for questions like 'my open tickets', 'anything urgent?', or " +
-                              "'all my tickets' — omit both filters to list everything."),
+                              "'all my tickets' — omit both filters to list everything. Results can span " +
+                              "several projects."),
+
+            AIFunctionFactory.Create(
+                (CancellationToken ct) => provider.ListProjectsAsync(ct),
+                name: "list_projects",
+                description: "List the projects the user can file tickets in — each has a key (e.g. 'SUP') " +
+                              "and a name (e.g. 'Support'). Use this to find the right project key before " +
+                              "creating a ticket in a particular area, or to answer 'what projects do I have?'. " +
+                              "Backends without a project concept return an empty list."),
 
             AIFunctionFactory.Create(
                 // createAnyway is read by OrchestrationLoop (not used here): the loop blocks a
@@ -93,13 +102,14 @@ public static class TicketTools
                 // relatedTo is filled in by OrchestrationLoop when a near-duplicate is created
                 // anyway, so the two tickets stay linked rather than drifting apart silently.
                 (string title, string? description, TicketPriority priority,
-                 string? assignee = null, string[]? labels = null, bool createAnyway = false,
-                 string[]? relatedTo = null, CancellationToken ct = default) =>
+                 string? project = null, string? assignee = null, string[]? labels = null,
+                 bool createAnyway = false, string[]? relatedTo = null, CancellationToken ct = default) =>
                     provider.CreateTicketAsync(
                         new CreateTicketRequest
                         {
                             Title = title,
                             Description = description,
+                            Project = project,
                             Priority = priority,
                             Assignee = assignee,
                             Labels = labels ?? [],
@@ -109,11 +119,14 @@ public static class TicketTools
                 name: CreateTicketToolName,
                 description: "Create a new ticket. Only call this once you have a title, a description, " +
                               "and a priority — if any is missing, ask the user for it rather than guessing. " +
-                              "assignee and labels are optional. If a ticket for the same issue already " +
-                              "exists for this user, you'll be told and asked to check with them first; set " +
-                              "createAnyway=true only after the user explicitly chooses to create a separate " +
-                              "new ticket. The user approves this in a confirmation card before it runs — a " +
-                              "returned result means they already approved and the ticket is fully created."),
+                              "project is the project key to create it in (e.g. 'SUP'); when the user could " +
+                              "have several, call list_projects and use the right one, or omit it to let the " +
+                              "user pick on the confirmation card. assignee and labels are optional. If a " +
+                              "ticket for the same issue already exists for this user, you'll be told and asked " +
+                              "to check with them first; set createAnyway=true only after the user explicitly " +
+                              "chooses to create a separate new ticket. The user approves this in a confirmation " +
+                              "card before it runs — a returned result means they already approved and the " +
+                              "ticket is fully created."),
 
             AIFunctionFactory.Create(
                 (string ticketId, TicketStatus status, CancellationToken ct) =>

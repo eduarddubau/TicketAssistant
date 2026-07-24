@@ -260,7 +260,7 @@ Set via `appsettings.json`, environment variables, or `.env` (see `.env.example`
 | `Tickets:Backend` | `Http` (the mock) \| `Jira` (real Jira Cloud via per-user OAuth, see below) \| `InMemory` (offline stub) | `Http` |
 | `Atlassian:ClientId` / `:ClientSecret` | OAuth 2.0 (3LO) app credentials (required for `Jira`) | — |
 | `Atlassian:RedirectUri` / `:FrontendOrigin` | OAuth callback URL and the console's origin | `…:5080/api/auth/jira/callback` / `…:4200` |
-| `Tickets:Jira:ProjectKey` | Project new tickets land in / reads are scoped to (required for `Jira`); also `:IssueType` / `:ScopeToReporter` | — |
+| `Tickets:Jira:ProjectKey` | *Optional* default project for new tickets (projects are otherwise chosen per ticket in the UI); also `:IssueType` / `:ScopeToReporter` | — |
 | `OLLAMA_GPU_DEVICE` (.env, compose only) | Device handed to the Ollama container; the up scripts set it automatically | empty = CPU |
 
 Only Ollama runs with no API key. `qwen3:4b` / `qwen3:8b` are heavier local alternatives with
@@ -272,28 +272,33 @@ provider, model, and GPU/CPU choice per request without touching configuration.
 The `ITicketProvider` seam means a real backend is a drop-in: `JiraTicketProvider` speaks to
 Jira Cloud's REST v3 API, and the orchestration loop, tools, and console are unchanged. Rather
 than one shared token, each user **logs into their own Jira** through an OAuth popup, and the
-assistant then acts as that account.
+assistant then acts as that account — reading across **all their sites and projects** and
+creating tickets into whichever project they choose, so they can hot-switch topics in one chat.
 
 **1. Register an OAuth 2.0 (3LO) app** at
 [developer.atlassian.com → your apps → Create → OAuth 2.0 integration](https://developer.atlassian.com/console/myapps/):
-- Add the **Jira API** permission with scopes
-  `read:jira-work`, `write:jira-work`, `read:jira-user`, and `offline_access`.
-- Under **Authorization → OAuth 2.0 (3LO)**, set the callback URL to
-  `http://localhost:5080/api/auth/jira/callback`.
-- Copy the app's **Client ID** and **Secret**.
+- **Permissions → Jira API** with scopes `read:jira-work`, `write:jira-work`, `read:jira-user`
+  (add `offline_access` too — it's requested automatically for the refresh token).
+- **Authorization → OAuth 2.0 (3LO)**, callback URL `http://localhost:5080/api/auth/jira/callback`.
+- **Settings → Authorization → Access**: choose **Account-level** if you want the assistant to
+  reach *every* site (workspace) on the account. **Resource-level** limits it to the one site the
+  user picks at login.
+- Copy the **Client ID** and **Secret** from **Settings**.
 
 **2. Fill in `.env`** (copied from `.env.example`):
 ```dotenv
 TICKETS_BACKEND=Jira
 ATLASSIAN_CLIENT_ID=<your client id>
 ATLASSIAN_CLIENT_SECRET=<your client secret>
-TICKETS_JIRA_PROJECT_KEY=SUP
+# Optional: a default project for new tickets. Leave unset to pick per ticket in the UI.
+#TICKETS_JIRA_PROJECT_KEY=SUP
 ```
 
 **3. Run** `./up.sh` (or `.\up.ps1`), open the console at **http://localhost:4200**, and click
 **Connect Jira**. A popup walks you through Atlassian's login/consent; once it closes you're
-connected, and "create a ticket for…" lands a real issue in your project — its id linking to
-`…/browse/KEY` on your site.
+connected. Ask about your tickets (across all projects/sites), and "create a ticket for…" shows
+a confirmation card with a **project picker** — approve and it lands a real issue, its id linking
+to `…/browse/KEY` on the right site.
 
 How it works: the popup returns to the API, which exchanges the code for tokens and stores them
 **server-side**, attached to your session. The browser only ever holds an opaque bearer session
@@ -307,14 +312,18 @@ Jira `accountId` via user search; and "related" tickets ↔ best-effort *Relates
 
 Worth knowing:
 
+- **Multi-site.** Reads fan out over every site the token can reach and merge; writes route to
+  the site hosting the target project/issue. This assumes **project keys are unique across your
+  sites** (the norm) — a colliding key resolves to the first site found. Needs **Account-level**
+  access (above); Resource-level grants just the one selected site.
 - **Genuinely per-user.** Each session acts as its own logged-in account, so `ScopeToReporter`
   (default `true`) means "only tickets you raised". Set `TICKETS_JIRA_SCOPE_TO_REPORTER=false`
-  to browse the whole project.
+  to include everything the account can see.
 - **Status transitions depend on your workflow.** A status change only works if the ticket's
   current status has a transition reaching the target; otherwise you get a clear error naming
   the target. `Blocked`/`Closed` need a workflow that actually has such states.
 - **Permissions.** The logged-in account needs Create, Transition, and (for undo) Delete on the
-  project. Undoing a create issues a real Jira delete.
+  relevant project. Undoing a create issues a real Jira delete.
 - This targets **Jira Cloud** (`*.atlassian.net`, API v3 + ADF). Jira Server/Data Center uses
   different auth and body formats and isn't covered.
 

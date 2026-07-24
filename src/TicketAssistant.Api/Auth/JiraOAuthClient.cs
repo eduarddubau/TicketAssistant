@@ -58,10 +58,10 @@ public sealed class JiraOAuthClient(HttpClient http, AtlassianOAuthOptions optio
     }
 
     /// <summary>
-    /// Finds the Jira site the tokens grant access to. An account may have several; this PoC
-    /// takes the first (see the plan's out-of-scope notes).
+    /// Every Jira site the tokens grant access to. With Account-level access this is all sites on
+    /// the account; with Resource-level, just the one the user selected at consent.
     /// </summary>
-    public async Task<(string CloudId, string SiteUrl)> GetAccessibleSiteAsync(string accessToken, CancellationToken ct)
+    public async Task<IReadOnlyList<JiraSite>> GetAccessibleSitesAsync(string accessToken, CancellationToken ct)
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, ResourcesUrl);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
@@ -69,9 +69,14 @@ public sealed class JiraOAuthClient(HttpClient http, AtlassianOAuthOptions optio
         response.EnsureSuccessStatusCode();
 
         var resources = await response.Content.ReadFromJsonAsync<List<AccessibleResource>>(ct) ?? [];
-        var site = resources.FirstOrDefault()
-                   ?? throw new InvalidOperationException("The Atlassian account has no accessible Jira sites.");
-        return (site.Id, site.Url.TrimEnd('/'));
+        var sites = resources
+            .Select(r => new JiraSite(r.Id, r.Url.TrimEnd('/'), r.Name ?? r.Url))
+            .ToList();
+        if (sites.Count == 0)
+        {
+            throw new InvalidOperationException("The Atlassian account has no accessible Jira sites.");
+        }
+        return sites;
     }
 
     /// <summary>

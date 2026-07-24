@@ -1,7 +1,7 @@
 import { Component, Input, OnDestroy, OnInit, inject, signal } from '@angular/core';
 import { ApiService } from '../services/api.service';
 import { JiraService } from '../services/jira.service';
-import { ConversationInfo, OrchestrationEvent } from '../models';
+import { ConversationInfo, JiraProject, OrchestrationEvent } from '../models';
 import { renderMarkdown } from '../markdown';
 import { ConfirmationCard, Decision } from './confirmation-card';
 
@@ -25,7 +25,7 @@ type LogItem =
         @if (item.kind === 'msg') {
           <div class="msg {{ item.role }}" [innerHTML]="item.html"></div>
         } @else {
-          <app-confirmation-card [event]="item.event" (decision)="onDecision($event)" />
+          <app-confirmation-card [event]="item.event" [projects]="cardProjects()" (decision)="onDecision($event)" />
         }
       }
       @if (streaming() !== null) {
@@ -98,6 +98,11 @@ export class Chat implements OnInit, OnDestroy {
     await this.run((onEvent) => this.api.sendMessage(this.conversation.conversationId, text, onEvent));
   }
 
+  // Projects offered on the create card — only for the Jira backend.
+  cardProjects(): JiraProject[] {
+    return this.conversation.ticketBackend === 'Jira' ? this.jira.projects() : [];
+  }
+
   async onDecision(d: Decision): Promise<void> {
     const payload = d.approved
       ? { callId: d.callId, approved: true, edits: d.edits }
@@ -160,7 +165,9 @@ export class Chat implements OnInit, OnDestroy {
 
   private ticketHref(id: string): string | null {
     if (this.conversation.ticketBackend === 'Jira') {
-      const site = this.jira.status().siteUrl;
+      // Route "SUP-1" to its site via the project key (unique across the user's sites).
+      const dash = id.lastIndexOf('-');
+      const site = this.jira.siteUrlForProjectKey(dash > 0 ? id.slice(0, dash) : id);
       return site ? `${site}/browse/${id}` : null;
     }
     return this.conversation.ticketUrlTemplate?.replace('{id}', id) ?? null;

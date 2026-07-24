@@ -4,6 +4,9 @@ namespace TicketAssistant.Api.Auth;
 public sealed class JiraNotConnectedException()
     : Exception("Not connected to Jira. Ask the user to connect their Jira account before doing this.");
 
+/// <summary>A valid access token plus the sites it can reach, for one request.</summary>
+public sealed record JiraAccess(string AccessToken, IReadOnlyList<JiraSite> Sites);
+
 /// <summary>
 /// Hands the Jira provider a usable access token for the current request's session, transparently
 /// refreshing it when it's about to expire. This is the seam that lets a singleton provider act
@@ -23,17 +26,17 @@ public sealed class JiraAccessTokenResolver(
     private readonly SemaphoreSlim _refreshLock = new(1, 1);
 
     /// <summary>
-    /// The current session's Jira access token plus the cloud id and site URL its calls need.
+    /// The current session's Jira access token and the sites it can reach.
     /// Throws <see cref="JiraNotConnectedException"/> when the session has no Jira connection.
     /// </summary>
-    public async Task<(string AccessToken, string CloudId, string SiteUrl)> ResolveAsync(CancellationToken ct)
+    public async Task<JiraAccess> ResolveAsync(CancellationToken ct)
     {
         var session = current.Get() ?? throw new JiraNotConnectedException();
         var conn = session.Jira ?? throw new JiraNotConnectedException();
 
         if (!IsExpiring(conn))
         {
-            return (conn.AccessToken, conn.CloudId, conn.SiteUrl);
+            return new JiraAccess(conn.AccessToken, conn.Sites);
         }
 
         await _refreshLock.WaitAsync(ct);
@@ -43,7 +46,7 @@ public sealed class JiraAccessTokenResolver(
             conn = session.Jira ?? throw new JiraNotConnectedException();
             if (!IsExpiring(conn))
             {
-                return (conn.AccessToken, conn.CloudId, conn.SiteUrl);
+                return new JiraAccess(conn.AccessToken, conn.Sites);
             }
 
             var refreshed = await oauth.RefreshAsync(conn.RefreshToken, ct);
@@ -57,7 +60,7 @@ public sealed class JiraAccessTokenResolver(
             };
             session.Jira = updated;
             logger.LogInformation("Refreshed the Jira access token for the current session");
-            return (updated.AccessToken, updated.CloudId, updated.SiteUrl);
+            return new JiraAccess(updated.AccessToken, updated.Sites);
         }
         finally
         {

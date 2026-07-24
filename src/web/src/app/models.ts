@@ -23,10 +23,23 @@ export interface ConversationInfo {
   ticketBackend: string;   // "Http" | "Jira" | "InMemory"
 }
 
+export interface JiraSiteInfo {
+  name: string;
+  siteUrl: string;
+}
+
 export interface JiraStatus {
   connected: boolean;
-  siteUrl?: string | null;
   accountEmail?: string | null;
+  sites?: JiraSiteInfo[];
+}
+
+// A project the user can create tickets in, tagged with its site (workspace) when several exist.
+export interface JiraProject {
+  key: string;
+  name: string;
+  siteName?: string | null;
+  siteUrl?: string | null;
 }
 
 export interface LlmInfo {

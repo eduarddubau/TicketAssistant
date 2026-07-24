@@ -1,24 +1,50 @@
-import { Injectable, inject, signal } from '@angular/core';
+import { Injectable, computed, inject, signal } from '@angular/core';
 import { API_BASE } from '../config';
-import { JiraStatus } from '../models';
+import { JiraProject, JiraStatus } from '../models';
 import { SessionService } from './session.service';
 
 /**
- * Drives the Jira OAuth popup login. `connect()` asks the API for an authorize URL, opens it in a
- * popup, and waits for the callback page to post back a completion message (validated to have come
- * from our API's origin) before re-reading status. The tokens themselves never touch the browser.
+ * Drives the Jira OAuth popup login and holds what the connected account can reach: the sites
+ * (workspaces) and the projects across them. `connect()` opens the popup and waits for the
+ * callback page to post back a completion message (validated to have come from our API's origin)
+ * before re-reading status. The tokens themselves never touch the browser.
  */
 @Injectable({ providedIn: 'root' })
 export class JiraService {
   private readonly session = inject(SessionService);
 
   readonly status = signal<JiraStatus>({ connected: false });
+  readonly projects = signal<JiraProject[]>([]);
+
+  // project key → its site's browser URL, for turning "SUP-1" in a reply into a link to the
+  // right site (project keys are unique across a user's sites in the normal case).
+  private readonly projectSites = computed(() => {
+    const map = new Map<string, string>();
+    for (const p of this.projects()) {
+      if (p.siteUrl) map.set(p.key.toUpperCase(), p.siteUrl);
+    }
+    return map;
+  });
+
+  siteUrlForProjectKey(projectKey: string): string | null {
+    return this.projectSites().get(projectKey.toUpperCase()) ?? null;
+  }
 
   async refresh(): Promise<void> {
     try {
       const res = await fetch(`${API_BASE}/api/auth/jira/status`, { headers: this.session.authHeader() });
-      if (res.ok) this.status.set(await res.json());
+      if (res.ok) {
+        this.status.set(await res.json());
+        if (this.status().connected) await this.loadProjects();
+      }
     } catch { /* leave as disconnected */ }
+  }
+
+  async loadProjects(): Promise<void> {
+    try {
+      const res = await fetch(`${API_BASE}/api/auth/jira/projects`, { headers: this.session.authHeader() });
+      if (res.ok) this.projects.set(await res.json());
+    } catch { this.projects.set([]); }
   }
 
   async connect(): Promise<void> {
@@ -49,5 +75,6 @@ export class JiraService {
   async logout(): Promise<void> {
     await fetch(`${API_BASE}/api/auth/jira/logout`, { method: 'POST', headers: this.session.authHeader() });
     this.status.set({ connected: false });
+    this.projects.set([]);
   }
 }

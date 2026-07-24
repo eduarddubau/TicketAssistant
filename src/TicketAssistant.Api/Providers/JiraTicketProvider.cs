@@ -8,34 +8,37 @@ using TicketAssistant.Api.Models;
 namespace TicketAssistant.Api.Providers;
 
 /// <summary>
-/// Talks to a real Jira Cloud site over its REST v3 API — the production-grade sibling of
+/// Talks to real Jira Cloud over its REST v3 API — the production-grade sibling of
 /// <see cref="HttpTicketProvider"/> (which targets this repo's mock). Selected by
 /// <c>Tickets:Backend=Jira</c>.
 ///
-/// Acts as *the logged-in user*: rather than one shared credential, every call resolves the
-/// current request's OAuth access token and cloud id from <see cref="JiraAccessTokenResolver"/>
-/// (which reads the bearer session) and targets <c>https://api.atlassian.com/ex/jira/{cloudId}</c>.
-/// The provider stays a singleton — the per-request identity comes from the resolver, exactly
-/// like the LLM client is chosen per request. Not connected yet? The resolver throws
-/// <see cref="JiraNotConnectedException"/>, which surfaces to the user as "connect Jira first".
+/// Acts as *the logged-in user*, across *all their sites*. Every call resolves the current
+/// request's OAuth token and the set of Jira sites it can reach from
+/// <see cref="JiraAccessTokenResolver"/> (which reads the bearer session), then targets
+/// <c>https://api.atlassian.com/ex/jira/{cloudId}</c> for a given site. Reads fan out over every
+/// site and merge; writes route to whichever site hosts the target project or issue (found by
+/// probing — relying on project keys being unique across a user's sites, which is the norm).
+///
+/// The provider stays a singleton — per-request identity comes from the resolver, like the LLM
+/// client is chosen per request. Not connected? The resolver throws
+/// <see cref="JiraNotConnectedException"/>, surfaced to the user as "connect Jira first".
 ///
 /// Jira's model differs from the app's in a few ways this class hides behind the
 /// <see cref="ITicketProvider"/> seam:
-///   • bodies are ADF (Atlassian Document Format, a JSON doc), not plain strings — see
-///     <see cref="AdfFromText"/> / <see cref="TextFromAdf"/>;
-///   • status can't be set directly — you POST a workflow *transition*, so
-///     <see cref="UpdateTicketStatusAsync"/> looks up an available transition to the target;
-///   • assignee is an opaque accountId, so a name/email is resolved via user search first;
-///   • our five statuses collapse onto Jira's three status *categories*, so list/search fetch
-///     the project's tickets and filter client-side rather than encoding statuses into JQL.
+///   • bodies are ADF (Atlassian Document Format, a JSON doc), not plain strings;
+///   • status can't be set directly — you POST a workflow *transition*;
+///   • assignee is an opaque accountId, resolved via user search;
+///   • our five statuses collapse onto Jira's three status *categories*, so status/priority are
+///     filtered client-side after the JQL fetch.
 /// </summary>
-public sealed class JiraTicketProvider(HttpClient http, JiraAccessTokenResolver resolver, JiraOptions options)
-    : ITicketProvider
+public sealed class JiraTicketProvider(
+    HttpClient http,
+    JiraAccessTokenResolver resolver,
+    JiraOptions options,
+    ILogger<JiraTicketProvider> logger) : ITicketProvider
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
-    // The fields every read asks Jira for. Requesting them explicitly keeps responses small and
-    // means the /search/jql endpoint returns full issues instead of bare keys.
     private const string Fields =
         "summary,description,status,priority,assignee,reporter,labels,created,updated,duedate,issuelinks";
 
@@ -45,10 +48,13 @@ public sealed class JiraTicketProvider(HttpClient http, JiraAccessTokenResolver 
 
     public async Task<CanonicalTicket> GetTicketAsync(string ticketId, CancellationToken ct = default)
     {
-        var (_, _, siteUrl) = await resolver.ResolveAsync(ct);
-        using var doc = await GetJsonAsync($"/rest/api/3/issue/{ticketId}?fields={Fields}", ct)
-                        ?? throw new KeyNotFoundException($"No ticket '{ticketId}' in Jira.");
-        return MapIssue(doc.RootElement, siteUrl);
+        var access = await resolver.ResolveAsync(ct);
+        foreach (var site in access.Sites)
+        {
+            using var doc = await GetJsonAsync(access, site.CloudId, $"/rest/api/3/issue/{ticketId}?fields={Fields}", ct);
+            if (doc is not null) return MapIssue(doc.RootElement, site.SiteUrl);
+        }
+        throw new KeyNotFoundException($"No ticket '{ticketId}' in any connected Jira site.");
     }
 
     public Task<IReadOnlyList<CanonicalTicket>> SearchTicketsAsync(string query, CancellationToken ct = default)
@@ -58,38 +64,87 @@ public sealed class JiraTicketProvider(HttpClient http, JiraAccessTokenResolver 
         TicketStatus? status = null, TicketPriority? priority = null, CancellationToken ct = default)
         => RunJqlAsync(query: null, status, priority, ct);
 
-    // Both list and search route through here. JQL narrows to the project (and reporter, when
-    // scoped) and — for search — a free-text match; status/priority are filtered in memory
-    // afterwards, since the app's five statuses don't line up 1:1 with Jira's workflow states.
+    public async Task<IReadOnlyList<TicketProject>> ListProjectsAsync(CancellationToken ct = default)
+    {
+        var access = await resolver.ResolveAsync(ct);
+        var projects = new List<TicketProject>();
+        foreach (var site in access.Sites)
+        {
+            try
+            {
+                using var doc = await GetJsonAsync(access, site.CloudId, "/rest/api/3/project/search?maxResults=50&orderBy=key", ct);
+                if (doc is null || !doc.RootElement.TryGetProperty("values", out var values) || values.ValueKind != JsonValueKind.Array)
+                    continue;
+                projects.AddRange(values.EnumerateArray()
+                    .Select(v => new TicketProject(
+                        v.GetProperty("key").GetString() ?? "", v.GetProperty("name").GetString() ?? "", site.Name, site.SiteUrl))
+                    .Where(p => p.Key.Length > 0));
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Could not list projects on Jira site {Site}", site.Name);
+            }
+        }
+        return projects;
+    }
+
+    // Reads span every site the token can reach, merged and sorted. Narrowed only by reporter
+    // (when scoped) and — for search — a free-text match; status/priority are filtered in memory,
+    // since the app's five statuses don't line up 1:1 with Jira's workflow states.
     private async Task<IReadOnlyList<CanonicalTicket>> RunJqlAsync(
         string? query, TicketStatus? status, TicketPriority? priority, CancellationToken ct)
     {
-        var (_, _, siteUrl) = await resolver.ResolveAsync(ct);
+        var access = await resolver.ResolveAsync(ct);
 
-        var clauses = new List<string> { $"project = \"{options.ProjectKey}\"" };
+        var clauses = new List<string>();
         if (options.ScopeToReporter) clauses.Add("reporter = currentUser()");
         if (!string.IsNullOrWhiteSpace(query)) clauses.Add($"text ~ \"{EscapeJql(query)}\"");
-        var jql = string.Join(" AND ", clauses) + " ORDER BY created DESC";
-
+        var jql = (clauses.Count > 0 ? string.Join(" AND ", clauses) + " " : "") + "ORDER BY created DESC";
         var url = $"/rest/api/3/search/jql?jql={Uri.EscapeDataString(jql)}&fields={Fields}&maxResults=100";
-        using var doc = await GetJsonAsync(url, ct);
-        if (doc is null) return [];
 
-        var tickets = doc.RootElement.GetProperty("issues").EnumerateArray()
-            .Select(i => MapIssue(i, siteUrl))
+        var tickets = new List<CanonicalTicket>();
+        foreach (var site in access.Sites)
+        {
+            try
+            {
+                using var doc = await GetJsonAsync(access, site.CloudId, url, ct);
+                if (doc is null || !doc.RootElement.TryGetProperty("issues", out var issues) || issues.ValueKind != JsonValueKind.Array)
+                    continue;
+                tickets.AddRange(issues.EnumerateArray().Select(i => MapIssue(i, site.SiteUrl)));
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Could not search tickets on Jira site {Site}", site.Name);
+            }
+        }
+
+        return tickets
             .Where(t => status is null || t.Status == status)
             .Where(t => priority is null || t.Priority == priority)
+            .OrderByDescending(t => t.CreatedAt)
             .ToList();
-        return tickets;
     }
 
     // ----- Writes -----
 
     public async Task<CanonicalTicket> CreateTicketAsync(CreateTicketRequest request, CancellationToken ct = default)
     {
+        var access = await resolver.ResolveAsync(ct);
+
+        // The target project comes from the request (the model or the confirmation card chooses
+        // it, so tickets can land in any accessible project), falling back to the configured
+        // default. With neither, ask rather than guess.
+        var projectKey = !string.IsNullOrWhiteSpace(request.Project) ? request.Project.Trim()
+            : !string.IsNullOrWhiteSpace(options.ProjectKey) ? options.ProjectKey
+            : throw new InvalidOperationException(
+                "No project was given for the new ticket. Ask the user which project it belongs in " +
+                "(use list_projects to see the options).");
+
+        var (cloudId, siteUrl) = await FindProjectSiteAsync(access, projectKey, ct);
+
         var fields = new Dictionary<string, object?>
         {
-            ["project"] = new { key = options.ProjectKey },
+            ["project"] = new { key = projectKey },
             ["issuetype"] = new { name = options.IssueType },
             ["summary"] = request.Title,
             ["priority"] = new { name = MapPriorityToJira(request.Priority) },
@@ -98,20 +153,18 @@ public sealed class JiraTicketProvider(HttpClient http, JiraAccessTokenResolver 
         if (!string.IsNullOrWhiteSpace(request.Description))
             fields["description"] = AdfFromText(request.Description);
         if (!string.IsNullOrWhiteSpace(request.Assignee)
-            && await ResolveAccountIdAsync(request.Assignee, ct) is { } accountId)
+            && await ResolveAccountIdAsync(access, cloudId, request.Assignee, ct) is { } accountId)
             fields["assignee"] = new { accountId };
 
-        using var created = await PostJsonAsync("/rest/api/3/issue", new { fields }, ct);
+        using var created = await PostJsonAsync(access, cloudId, "/rest/api/3/issue", new { fields }, ct);
         var key = created.RootElement.GetProperty("key").GetString()!;
 
-        // Jira has no "related to" field; model it as best-effort "Relates" issue links so a
-        // near-duplicate stays connected. A missing link type or permission shouldn't fail the
-        // create the user already approved, so each link is swallowed on error.
+        // Best-effort "Relates" links (same site — Jira can't link across sites anyway).
         foreach (var related in request.RelatedTo)
         {
             try
             {
-                using var link = await SendAsync(HttpMethod.Post, "/rest/api/3/issueLink", new
+                using var link = await SendAsync(access, cloudId, HttpMethod.Post, "/rest/api/3/issueLink", new
                 {
                     type = new { name = "Relates" },
                     inwardIssue = new { key },
@@ -122,97 +175,139 @@ public sealed class JiraTicketProvider(HttpClient http, JiraAccessTokenResolver 
             catch { /* linking is a nicety, not a requirement */ }
         }
 
-        return await GetTicketAsync(key, ct);
+        return await GetIssueAsync(access, cloudId, siteUrl, key, ct);
     }
 
     public async Task<CanonicalTicket> UpdateTicketStatusAsync(string ticketId, TicketStatus status, CancellationToken ct = default)
     {
-        var transitionId = await FindTransitionIdAsync(ticketId, status, ct)
+        var access = await resolver.ResolveAsync(ct);
+        var (cloudId, siteUrl) = await FindIssueSiteAsync(access, ticketId, ct);
+
+        var transitionId = await FindTransitionIdAsync(access, cloudId, ticketId, status, ct)
             ?? throw new InvalidOperationException(
                 $"No workflow transition on '{ticketId}' reaches a {status} state. " +
                 "Jira only allows the moves its workflow defines from the ticket's current status.");
 
-        using var response = await SendAsync(HttpMethod.Post,
+        using var response = await SendAsync(access, cloudId, HttpMethod.Post,
             $"/rest/api/3/issue/{ticketId}/transitions", new { transition = new { id = transitionId } }, ct);
         await EnsureSuccessAsync(response, ct);
-        return await GetTicketAsync(ticketId, ct);
+        return await GetIssueAsync(access, cloudId, siteUrl, ticketId, ct);
     }
 
     public async Task<CanonicalTicket> AssignTicketAsync(string ticketId, string? assignee, CancellationToken ct = default)
     {
-        // A null accountId unassigns; a non-empty name/email must resolve to a real account.
+        var access = await resolver.ResolveAsync(ct);
+        var (cloudId, siteUrl) = await FindIssueSiteAsync(access, ticketId, ct);
+
         string? accountId = null;
         if (!string.IsNullOrWhiteSpace(assignee))
-            accountId = await ResolveAccountIdAsync(assignee, ct)
+            accountId = await ResolveAccountIdAsync(access, cloudId, assignee, ct)
                 ?? throw new InvalidOperationException($"No Jira user matches '{assignee}'.");
 
-        using var response = await SendAsync(HttpMethod.Put,
+        using var response = await SendAsync(access, cloudId, HttpMethod.Put,
             $"/rest/api/3/issue/{ticketId}/assignee", new { accountId }, ct);
         await EnsureSuccessAsync(response, ct);
-        return await GetTicketAsync(ticketId, ct);
+        return await GetIssueAsync(access, cloudId, siteUrl, ticketId, ct);
     }
 
     public async Task<CanonicalTicket> SetDueDateAsync(string ticketId, DateTimeOffset? dueAt, CancellationToken ct = default)
     {
-        // Jira's duedate is a bare calendar date; null clears it.
+        var access = await resolver.ResolveAsync(ct);
+        var (cloudId, siteUrl) = await FindIssueSiteAsync(access, ticketId, ct);
+
         var duedate = dueAt?.ToString("yyyy-MM-dd");
-        using var response = await SendAsync(HttpMethod.Put,
+        using var response = await SendAsync(access, cloudId, HttpMethod.Put,
             $"/rest/api/3/issue/{ticketId}", new { fields = new { duedate } }, ct);
         await EnsureSuccessAsync(response, ct);
-        return await GetTicketAsync(ticketId, ct);
+        return await GetIssueAsync(access, cloudId, siteUrl, ticketId, ct);
     }
 
     public async Task<TicketComment> AddCommentAsync(string ticketId, string body, CancellationToken ct = default)
     {
-        using var created = await PostJsonAsync($"/rest/api/3/issue/{ticketId}/comment", new { body = AdfFromText(body) }, ct);
+        var access = await resolver.ResolveAsync(ct);
+        var (cloudId, _) = await FindIssueSiteAsync(access, ticketId, ct);
+
+        using var created = await PostJsonAsync(access, cloudId, $"/rest/api/3/issue/{ticketId}/comment", new { body = AdfFromText(body) }, ct);
         return MapComment(created.RootElement);
     }
 
     public async Task DeleteTicketAsync(string ticketId, CancellationToken ct = default)
     {
-        using var response = await SendAsync(HttpMethod.Delete, $"/rest/api/3/issue/{ticketId}", null, ct);
+        var access = await resolver.ResolveAsync(ct);
+        var (cloudId, _) = await FindIssueSiteAsync(access, ticketId, ct);
+        using var response = await SendAsync(access, cloudId, HttpMethod.Delete, $"/rest/api/3/issue/{ticketId}", null, ct);
         await EnsureSuccessAsync(response, ct);
     }
 
     public async Task DeleteLastCommentAsync(string ticketId, CancellationToken ct = default)
     {
-        // Jira has no "delete last" — read the comments (ascending) and delete the final one.
-        using var doc = await GetJsonAsync($"/rest/api/3/issue/{ticketId}/comment", ct);
+        var access = await resolver.ResolveAsync(ct);
+        var (cloudId, _) = await FindIssueSiteAsync(access, ticketId, ct);
+
+        using var doc = await GetJsonAsync(access, cloudId, $"/rest/api/3/issue/{ticketId}/comment", ct);
         var last = doc?.RootElement.GetProperty("comments").EnumerateArray().LastOrDefault();
         if (last is not { ValueKind: JsonValueKind.Object }) return;
 
         var commentId = last.Value.GetProperty("id").GetString();
-        using var response = await SendAsync(HttpMethod.Delete, $"/rest/api/3/issue/{ticketId}/comment/{commentId}", null, ct);
+        using var response = await SendAsync(access, cloudId, HttpMethod.Delete, $"/rest/api/3/issue/{ticketId}/comment/{commentId}", null, ct);
         await EnsureSuccessAsync(response, ct);
     }
 
-    // ----- Helpers: HTTP -----
+    // ----- Site routing -----
 
-    // Resolves the current session's access token + cloud id, then builds an authenticated
-    // request against /ex/jira/{cloudId}{path}. This is the one place per-user identity enters
-    // the transport, so every call above stays oblivious to whose Jira it's hitting.
-    private async Task<HttpResponseMessage> SendAsync(HttpMethod method, string path, object? body, CancellationToken ct)
+    // Which site hosts a given project (probes each until one has it). Relies on project keys
+    // being unique across a user's sites — the normal case; a collision resolves to the first.
+    private async Task<(string CloudId, string SiteUrl)> FindProjectSiteAsync(JiraAccess access, string projectKey, CancellationToken ct)
     {
-        var (token, cloudId, _) = await resolver.ResolveAsync(ct);
+        foreach (var site in access.Sites)
+        {
+            using var doc = await GetJsonAsync(access, site.CloudId, $"/rest/api/3/project/{Uri.EscapeDataString(projectKey)}", ct);
+            if (doc is not null) return (site.CloudId, site.SiteUrl);
+        }
+        throw new InvalidOperationException($"No accessible Jira site has a project '{projectKey}'.");
+    }
+
+    // Which site holds a given issue (probes each with a cheap fields=summary read).
+    private async Task<(string CloudId, string SiteUrl)> FindIssueSiteAsync(JiraAccess access, string ticketId, CancellationToken ct)
+    {
+        foreach (var site in access.Sites)
+        {
+            using var doc = await GetJsonAsync(access, site.CloudId, $"/rest/api/3/issue/{ticketId}?fields=summary", ct);
+            if (doc is not null) return (site.CloudId, site.SiteUrl);
+        }
+        throw new KeyNotFoundException($"No ticket '{ticketId}' in any connected Jira site.");
+    }
+
+    private async Task<CanonicalTicket> GetIssueAsync(JiraAccess access, string cloudId, string siteUrl, string ticketId, CancellationToken ct)
+    {
+        using var doc = await GetJsonAsync(access, cloudId, $"/rest/api/3/issue/{ticketId}?fields={Fields}", ct)
+                        ?? throw new KeyNotFoundException($"No ticket '{ticketId}' in Jira.");
+        return MapIssue(doc.RootElement, siteUrl);
+    }
+
+    // ----- Helpers: HTTP (per site) -----
+
+    private async Task<HttpResponseMessage> SendAsync(JiraAccess access, string cloudId, HttpMethod method, string path, object? body, CancellationToken ct)
+    {
         using var request = new HttpRequestMessage(method, $"/ex/jira/{cloudId}{path}");
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", access.AccessToken);
         if (body is not null)
             request.Content = JsonContent.Create(body, options: Json);
         return await http.SendAsync(request, ct);
     }
 
-    private async Task<JsonDocument?> GetJsonAsync(string path, CancellationToken ct)
+    private async Task<JsonDocument?> GetJsonAsync(JiraAccess access, string cloudId, string path, CancellationToken ct)
     {
-        using var response = await SendAsync(HttpMethod.Get, path, null, ct);
+        using var response = await SendAsync(access, cloudId, HttpMethod.Get, path, null, ct);
         if (response.StatusCode == HttpStatusCode.NotFound) return null;
         await EnsureSuccessAsync(response, ct);
         await using var stream = await response.Content.ReadAsStreamAsync(ct);
         return await JsonDocument.ParseAsync(stream, cancellationToken: ct);
     }
 
-    private async Task<JsonDocument> PostJsonAsync(string path, object body, CancellationToken ct)
+    private async Task<JsonDocument> PostJsonAsync(JiraAccess access, string cloudId, string path, object body, CancellationToken ct)
     {
-        using var response = await SendAsync(HttpMethod.Post, path, body, ct);
+        using var response = await SendAsync(access, cloudId, HttpMethod.Post, path, body, ct);
         await EnsureSuccessAsync(response, ct);
         await using var stream = await response.Content.ReadAsStreamAsync(ct);
         return await JsonDocument.ParseAsync(stream, cancellationToken: ct);
@@ -228,21 +323,20 @@ public sealed class JiraTicketProvider(HttpClient http, JiraAccessTokenResolver 
             $"Jira returned {(int)response.StatusCode} {response.ReasonPhrase}: {detail}");
     }
 
-    // Resolves a display name or email to an accountId via user search; null when nothing matches.
-    private async Task<string?> ResolveAccountIdAsync(string query, CancellationToken ct)
+    // Resolves a display name or email to an accountId via user search on a specific site.
+    private async Task<string?> ResolveAccountIdAsync(JiraAccess access, string cloudId, string query, CancellationToken ct)
     {
-        using var doc = await GetJsonAsync($"/rest/api/3/user/search?query={Uri.EscapeDataString(query)}", ct);
+        using var doc = await GetJsonAsync(access, cloudId, $"/rest/api/3/user/search?query={Uri.EscapeDataString(query)}", ct);
         var first = doc?.RootElement.EnumerateArray().FirstOrDefault();
         return first is { ValueKind: JsonValueKind.Object } && first.Value.TryGetProperty("accountId", out var id)
             ? id.GetString()
             : null;
     }
 
-    // Picks the workflow transition whose target status best matches the desired canonical
-    // status, or null when none is available from the ticket's current state.
-    private async Task<string?> FindTransitionIdAsync(string ticketId, TicketStatus target, CancellationToken ct)
+    // Picks the workflow transition whose target status best matches the desired canonical status.
+    private async Task<string?> FindTransitionIdAsync(JiraAccess access, string cloudId, string ticketId, TicketStatus target, CancellationToken ct)
     {
-        using var doc = await GetJsonAsync($"/rest/api/3/issue/{ticketId}/transitions", ct);
+        using var doc = await GetJsonAsync(access, cloudId, $"/rest/api/3/issue/{ticketId}/transitions", ct);
         if (doc is null) return null;
 
         string? bestId = null;
@@ -385,8 +479,7 @@ public sealed class JiraTicketProvider(HttpClient http, JiraAccessTokenResolver 
     }
 
     // Flattens an ADF document back to plain text by collecting every "text" node, joining the
-    // top-level blocks (paragraphs, list items…) with newlines. Good enough to show the model
-    // and the user what a ticket says without rendering rich formatting.
+    // top-level blocks (paragraphs, list items…) with newlines.
     private static string TextFromAdf(JsonElement node)
     {
         if (node.ValueKind != JsonValueKind.Object) return "";
