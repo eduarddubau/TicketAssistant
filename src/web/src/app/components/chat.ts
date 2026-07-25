@@ -131,35 +131,32 @@ type LogItem =
       -webkit-mask-composite: xor; mask-composite: exclude;
       opacity: 0.8; transition: opacity 0.5s var(--ease);
     }
-    /* A square at least 250% of *both* dimensions, so the spin covers the bubble whatever shape it
-       is. Sizing it off the width alone (the obvious width: 250% plus aspect-ratio: 1) works only
-       while a bubble is about as tall as it is wide: a long ticket listing is far taller, and the
-       light stopped part-way down it. min-width/min-height with an aspect ratio resolves to a
-       square of the larger one — 5000px for a 300x2000 bubble. */
+    /* Fills the bubble exactly, whatever shape it is — no oversized layer to rasterize. */
     .ring i {
-      position: absolute; top: 50%; left: 50%;
-      width: auto; height: auto; min-width: 250%; min-height: 250%; aspect-ratio: 1;
-      background: conic-gradient(#4f8bff, #9b5cff, #ff5ca8, #38e1ff, #4f8bff);
-      transform: translate(-50%, -50%);
-      animation: glow-spin 6s linear infinite;    /* idle: clearly alive, just unhurried */
+      position: absolute; inset: 0; --sweep: 0deg;
+      background: conic-gradient(from var(--sweep), #4f8bff, #9b5cff, #ff5ca8, #38e1ff, #4f8bff);
     }
+    /* Only the reply being written moves. Every settled bubble keeps its lit border, but a still
+       one: motion means the gradient is repainted every frame, and a thread of ten replies was
+       paying that ten times over for a shimmer nobody is reading. Now the movement means something
+       — something is happening — and costs one bubble's worth. */
     .ring.hot { opacity: 1; }
-    .ring.hot i { animation-duration: 2s; }        /* generating: races */
+    .ring.hot i { animation: glow-sweep 2s linear infinite; }
 
 
-    /* Interior counter-rotating glow — only while generating, so it never sits behind settled
-       text. Clipped to the bubble so it can't bleed outside. */
+    /* Interior counter-sweeping glow — only rendered while generating (see the template), so it
+       never sits behind settled text. Clipped to the bubble so it can't bleed outside. */
     .inner {
       position: absolute; inset: 0; z-index: 0; pointer-events: none;
       border-radius: 18px; overflow: hidden; opacity: 0.6;
     }
+    /* Overhangs the bubble so the blur's own fade falls outside the clip rather than leaving a pale
+       rim inside it — 25%, not 250%: the point is to cover the edges, not to survive a rotation. */
     .inner i {
-      position: absolute; top: 50%; left: 50%;
-      width: auto; height: auto; min-width: 250%; min-height: 250%; aspect-ratio: 1;
-      background: conic-gradient(#4f8bff, #9b5cff, #ff5ca8, #38e1ff, #4f8bff);
+      position: absolute; inset: -25%; --sweep: 0deg;
+      background: conic-gradient(from var(--sweep), #4f8bff, #9b5cff, #ff5ca8, #38e1ff, #4f8bff);
       filter: blur(22px);
-      transform: translate(-50%, -50%);
-      animation: glow-spin 4s linear infinite reverse;
+      animation: glow-sweep 4s linear infinite reverse;
     }
 
     .bubble.assistant {
