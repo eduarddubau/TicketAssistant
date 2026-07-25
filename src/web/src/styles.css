@@ -119,24 +119,25 @@ button { cursor: pointer; }
 }
 @keyframes blink { 50% { opacity: 0; } }
 
-/* The "AI glow": one lap of a motion path, used by the lights that travel a bubble's border.
-   Moving a small element beats every alternative that scales with the bubble — a rotating gradient
-   square has to be 2.5x the bubble's larger side to cover it at every angle (12 megapixels for a
-   normal reply, and a GPU holds the whole layer: enough of those and compositing dies, taking the
-   page with it), while animating a conic gradient's angle repaints the entire bubble every frame.
-   This animates offset-distance on a 120px dot, so the cost is fixed no matter how long the reply. */
-@keyframes glow-travel {
-  from { offset-distance: 0%; }
-  to { offset-distance: 100%; }
+/* The "AI glow": the whole border's colour turning, as a conic gradient whose angle sweeps.
+   The element stays exactly bubble-sized — that's the part that matters. The version that broke the
+   page rotated a *square* instead, which has to be 2.5x the bubble's larger side to cover it at
+   every angle: 12 megapixels for a normal reply, ~48 MB of GPU layer each, and a few long replies
+   were enough to kill compositing. Turning the gradient in place needs no extra pixels at all.
+   What it does need is a repaint per change, which is why the step counts at the call sites are the
+   real setting: the angle moves in whole degrees-per-step rather than continuously, so a lap costs
+   15-30 repaints a second instead of 60. Two degrees of a five-colour gradient is nothing to see,
+   and the blurred interior glow can afford six. */
+@property --sweep {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+@keyframes glow-sweep {
+  from { --sweep: 0deg; }
+  to { --sweep: 360deg; }
 }
 
-/* The interior glow's own motion: a circle about the bubble's middle. The radius is a share of the
-   element's own width, so it's the same orbit whatever shape the bubble is — and it's one transform
-   on one small element, the cheapest kind of animation there is. */
-@keyframes glow-orbit {
-  from { transform: rotate(0deg) translateX(38%); }
-  to { transform: rotate(360deg) translateX(38%); }
-}
 
 /* The user bubble's own life: its gradient fill drifts across it, and the glow beneath it
    breathes. Two separate properties, so the animations compose instead of fighting. */
