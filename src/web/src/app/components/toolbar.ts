@@ -55,7 +55,7 @@ import { FilterPill } from './filter-pill';
         </app-filter-pill>
 
         <!-- Who the mock board thinks you are. "admin" is its reserved name for the whole board. -->
-        <div class="ctl" title="Who you are on the mock board — it scopes tickets to what you raised or were assigned. 'admin' sees the whole board.">
+        <div class="ctl" title="Who you are on the mock board — it scopes tickets to what you raised or were assigned. 'charlie' owns nothing there, so reads come only from connected accounts; 'admin' sees the whole board.">
           <span class="lbl">User</span>
           <select class="sel user" [value]="session.userName()" (change)="onUser($any($event.target).value)">
             @for (u of session.users; track u) { <option [value]="u">{{ u }}</option> }
