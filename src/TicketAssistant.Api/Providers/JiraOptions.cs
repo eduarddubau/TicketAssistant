@@ -10,13 +10,18 @@ public sealed class JiraOptions
     /// <summary>Project key new tickets land in and every read is scoped to, e.g. <c>SUP</c>.</summary>
     public string ProjectKey { get; init; } = "";
 
-    /// <summary>Issue type created tickets use. "Task" exists in most projects; "Bug"/"Story" also common.</summary>
+    /// <summary>
+    /// Issue type used when a create doesn't name one ("file a ticket for…" with no kind given).
+    /// "Task" exists in most projects; "Bug"/"Story" also common. A create that *does* name a kind
+    /// wins over this — see <see cref="Models.CreateTicketRequest.Type"/>.
+    /// </summary>
     public string IssueType { get; init; } = "Task";
 
     /// <summary>
-    /// When true, reads add <c>reporter = currentUser()</c> so a user only sees tickets they
-    /// raised — now genuinely per-user, since each session acts as its own logged-in Jira account.
-    /// Set false to browse the whole project.
+    /// When true, reads add <c>reporter = currentUser() OR assignee = currentUser()</c>, so a user
+    /// sees everything they raised *or* had put on their plate — genuinely per-user, since each
+    /// session acts as its own logged-in Jira account. Set false to browse everything the account
+    /// can see.
     /// </summary>
-    public bool ScopeToReporter { get; init; } = true;
+    public bool ScopeToCurrentUser { get; init; } = true;
 }

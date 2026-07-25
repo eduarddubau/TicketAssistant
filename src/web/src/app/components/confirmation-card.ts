@@ -14,7 +14,8 @@ const STATUSES = ['Open', 'InProgress', 'Blocked', 'Resolved', 'Closed'];
 
 // One editable card per write tool — the same field sets the original console offered, so the
 // user can review and tweak what the model proposed before it runs. When creating and the user
-// has projects (Jira), a project picker is prepended so the ticket lands in the right place.
+// has projects (Jira), project and kind pickers are prepended so the item lands in the right place
+// as the right kind of thing — a model that heard "task" as "ticket" is fixable here.
 function specFor(evt: ConfirmationEvent): Spec {
   const a = evt.arguments ?? {};
   // Editable: if the model picked the wrong ticket, the user corrects it here. The card shows the
@@ -29,7 +30,7 @@ function specFor(evt: ConfirmationEvent): Spec {
         { key: 'priority', label: 'Severity', kind: 'select', options: SEVERITIES },
       ];
       return {
-        heading: '⚠️ Review & confirm new ticket', verb: 'Create ticket',
+        heading: '⚠️ Review & confirm new item', verb: 'Create',
         fields,
         initial: { title: a['title'] ?? '', description: a['description'] ?? '', priority: a['priority'] ?? 'Medium' },
         edits: (v) => ({ title: v['title'], description: v['description'], priority: v['priority'] }),
@@ -89,8 +90,9 @@ function specFor(evt: ConfirmationEvent): Spec {
       <h3>{{ spec.heading }}</h3>
 
       @if (isCreate) {
-        <!-- Where the ticket goes. Provider is always asked for; site and project only appear for
-             providers that actually have them, so a flat backend isn't padded with empty pickers. -->
+        <!-- Where the new item goes and what kind it is. Provider is always asked for; site,
+             project and kind only appear for backends that actually have them, so a flat backend
+             isn't padded with empty pickers. -->
         <div class="target">
           <label class="fld">
             Provider
@@ -111,10 +113,21 @@ function specFor(evt: ConfirmationEvent): Spec {
           @if (projectOptions().length) {
             <label class="fld">
               Project
-              <select [disabled]="decided()" [(ngModel)]="target.project">
+              <select [disabled]="decided()" [(ngModel)]="target.project" (ngModelChange)="onProjectChange()">
                 @for (p of projectOptions(); track p.key) {
                   <option [value]="p.key">{{ p.key }}{{ p.name && p.name !== p.key ? ' — ' + p.name : '' }}</option>
                 }
+              </select>
+            </label>
+          }
+
+          <!-- What kind of thing this is. Only the kinds the chosen project actually accepts are
+               offered, so an approved card can't be rejected by the backend for an unknown type. -->
+          @if (typeOptions().length) {
+            <label class="fld">
+              Kind
+              <select [disabled]="decided()" [(ngModel)]="target.type">
+                @for (t of typeOptions(); track t) { <option [value]="t">{{ t }}</option> }
               </select>
             </label>
           }
@@ -151,11 +164,11 @@ function specFor(evt: ConfirmationEvent): Spec {
       }
       @if (!decided()) {
         <div class="actions">
-          <button class="approve" [disabled]="!valid()" (click)="approve()">{{ spec.verb }}</button>
+          <button class="approve" [disabled]="!valid()" (click)="approve()">{{ verbLabel() }}</button>
           <button class="decline" (click)="declineIt()">Cancel</button>
         </div>
       } @else {
-        <div class="decided">{{ approvedChoice ? '✓ ' + spec.verb : '✗ Cancelled' }}</div>
+        <div class="decided">{{ approvedChoice ? '✓ ' + verbLabel() : '✗ Cancelled' }}</div>
       }
     </div>
   `,
@@ -225,9 +238,9 @@ export class ConfirmationCard implements OnInit {
 
   private readonly projectsSvc = inject(ProjectsService);
 
-  /** Where a new ticket should go. Provider is always required; the rest depend on the provider. */
-  target: { provider: string; site: string | null; project: string | null } =
-    { provider: '', site: null, project: null };
+  /** Where a new item goes and what kind it is. Provider is always required; the rest depend on it. */
+  target: { provider: string; site: string | null; project: string | null; type: string | null } =
+    { provider: '', site: null, project: null, type: null };
 
   get isCreate(): boolean { return this.event.toolName === 'create_ticket'; }
 
@@ -245,8 +258,13 @@ export class ConfirmationCard implements OnInit {
       : [];
   }
 
-  // Changing provider (or site) invalidates the narrower choices below it — reset to the first
-  // available so the card never sits on a combination that doesn't exist.
+  /** The kinds the chosen project accepts; empty means the backend didn't say, so we don't ask. */
+  typeOptions(): string[] {
+    return this.projectsSvc.itemTypesFor(this.target.project);
+  }
+
+  // Changing provider (or site, or project) invalidates the narrower choices below it — reset to the
+  // first available so the card never sits on a combination that doesn't exist.
   onProviderChange(): void {
     this.target.site = this.siteOptions()[0] ?? null;
     this.onSiteChange();
@@ -254,6 +272,28 @@ export class ConfirmationCard implements OnInit {
 
   onSiteChange(): void {
     this.target.project = this.projectOptions()[0]?.key ?? null;
+    this.onProjectChange();
+  }
+
+  // Kinds are per project, so keep the current one only if the new project has it too.
+  onProjectChange(): void {
+    const kinds = this.typeOptions();
+    this.target.type = this.matchType(this.target.type, kinds) ?? kinds[0] ?? null;
+  }
+
+  /** The offered kind matching a proposed one, case-insensitively ("task" -> "Task"). */
+  private matchType(proposed: string | null | undefined, options: string[]): string | null {
+    const wanted = `${proposed ?? ''}`.trim().toLowerCase();
+    return options.find((o) => o.toLowerCase() === wanted) ?? null;
+  }
+
+  /**
+   * The button's words. On a create they follow the chosen kind — "Create task" rather than a
+   * generic "Create" — so the button states what is about to happen, including after the user
+   * changes the kind.
+   */
+  verbLabel(): string {
+    return this.isCreate ? `Create ${(this.target.type ?? 'item').toLowerCase()}` : this.spec.verb;
   }
 
   hasTicketId(): boolean {
@@ -285,6 +325,9 @@ export class ConfirmationCard implements OnInit {
       this.target.provider = match?.provider ?? this.providerOptions()[0]?.id ?? '';
       this.target.site = match?.siteName ?? this.siteOptions()[0] ?? null;
       this.target.project = match?.key ?? this.projectOptions()[0]?.key ?? null;
+      // Then the kind the model proposed, if this project has it; otherwise its first.
+      const kinds = this.typeOptions();
+      this.target.type = this.matchType(`${this.event.arguments?.['type'] ?? ''}`, kinds) ?? kinds[0] ?? null;
     }
   }
 
@@ -301,6 +344,9 @@ export class ConfirmationCard implements OnInit {
     const edits = this.spec.edits(this.values);
     if (this.isCreate && this.target.project) {
       edits['project'] = this.target.project;
+    }
+    if (this.isCreate && this.target.type) {
+      edits['type'] = this.target.type;
     }
     this.decision.emit({ approved: true, callId: this.event.callId, edits });
   }

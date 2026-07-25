@@ -93,7 +93,9 @@ type LogItem =
     :host { display: flex; flex-direction: column; min-height: 0; flex: 1; }
 
     .thread { flex: 1; overflow-y: auto; padding: 1.6rem 1rem 0.5rem; }
-    .col { width: 100%; max-width: 780px; margin: 0 auto; display: flex; flex-direction: column; gap: 1rem; }
+    /* Wide enough for a grouped listing to keep its lines on one row each, still narrow enough to
+       read as a conversation rather than a page of text. */
+    .col { width: 100%; max-width: 1020px; margin: 0 auto; display: flex; flex-direction: column; gap: 1rem; }
 
     .row { display: flex; gap: 0.7rem; align-items: flex-start; max-width: 100%; animation: rise 0.35s var(--ease); }
     .row.user { flex-direction: row-reverse; }
@@ -116,11 +118,12 @@ type LogItem =
 
     /* Holds the ring and the bubble as siblings, so the ring can be clipped to the bubble's
        shape independently of its content. */
-    .bubble-wrap { position: relative; max-width: 80%; min-width: 0; }
+    .bubble-wrap { position: relative; max-width: 86%; min-width: 0; }
 
-    /* Light travelling around the bubble wall: a conic gradient spinning inside a box clipped to
-       the bubble's rounded rectangle and masked to a thin band, so only the border lights up.
-       Every assistant message keeps a calm version of it; the one being generated turns it up. */
+    /* Light travelling around the bubble wall: a conic gradient whose angle sweeps, inside a box
+       clipped to the bubble's rounded rectangle and masked to a thin band, so only the border
+       lights up. Every assistant message keeps a calm version of it; the one being generated turns
+       it up. */
     .ring {
       position: absolute; inset: 0; z-index: 2; pointer-events: none;
       border-radius: 18px; overflow: hidden; padding: 1.5px;
@@ -129,28 +132,30 @@ type LogItem =
       -webkit-mask-composite: xor; mask-composite: exclude;
       opacity: 0.8; transition: opacity 0.5s var(--ease);
     }
+    /* Fills the bubble whatever its shape (see --sweep in styles.css): a long listing is far
+       taller than it is wide, and the light has to travel all the way round it. */
     .ring i {
-      position: absolute; top: 50%; left: 50%; width: 250%; aspect-ratio: 1;
-      background: conic-gradient(#4f8bff, #9b5cff, #ff5ca8, #38e1ff, #4f8bff);
-      transform: translate(-50%, -50%);
-      animation: glow-spin 6s linear infinite;    /* idle: clearly alive, just unhurried */
+      position: absolute; inset: 0; --sweep: 0deg;
+      background: conic-gradient(from var(--sweep), #4f8bff, #9b5cff, #ff5ca8, #38e1ff, #4f8bff);
+      animation: glow-sweep 6s linear infinite;   /* idle: clearly alive, just unhurried */
     }
     .ring.hot { opacity: 1; }
     .ring.hot i { animation-duration: 2s; }        /* generating: races */
 
 
-    /* Interior counter-rotating glow — only while generating, so it never sits behind settled
+    /* Interior counter-sweeping glow — only while generating, so it never sits behind settled
        text. Clipped to the bubble so it can't bleed outside. */
     .inner {
       position: absolute; inset: 0; z-index: 0; pointer-events: none;
       border-radius: 18px; overflow: hidden; opacity: 0.6;
     }
+    /* Overhangs the bubble so the blur's own fade falls outside the clip, instead of leaving a
+       pale rim inside it. */
     .inner i {
-      position: absolute; top: 50%; left: 50%; width: 250%; aspect-ratio: 1;
-      background: conic-gradient(#4f8bff, #9b5cff, #ff5ca8, #38e1ff, #4f8bff);
+      position: absolute; inset: -25%; --sweep: 0deg;
+      background: conic-gradient(from var(--sweep), #4f8bff, #9b5cff, #ff5ca8, #38e1ff, #4f8bff);
       filter: blur(22px);
-      transform: translate(-50%, -50%);
-      animation: glow-spin 4s linear infinite reverse;
+      animation: glow-sweep 4s linear infinite reverse;
     }
 
     .bubble.assistant {
@@ -180,6 +185,20 @@ type LogItem =
     }
 
     .bubble p:first-child { margin-top: 0; } .bubble p:last-child { margin-bottom: 0; }
+
+    /* Lists and headings carry most answers (a grouped listing is heading + bullets per group), so
+       they're tightened up to sit inside a bubble rather than inherit page-sized spacing. */
+    .bubble ul, .bubble ol { margin: 0.45rem 0; padding-left: 1.2rem; }
+    .bubble li { margin: 0.15rem 0; }
+    .bubble li::marker { color: var(--text-faint); }
+    .bubble.user li::marker { color: rgba(255, 255, 255, 0.6); }
+    .bubble h4 {
+      margin: 0.85rem 0 0.35rem; font-size: 0.88rem; font-weight: 700; letter-spacing: -0.01em;
+    }
+    .bubble hr { margin: 0.75rem 0; border: 0; border-top: 1px solid var(--border); }
+    .bubble.user hr { border-top-color: rgba(255, 255, 255, 0.35); }
+    .bubble > :first-child { margin-top: 0; }
+    .bubble > :last-child { margin-bottom: 0; }
     .bubble a { color: #cdc6ff; text-decoration: underline; text-underline-offset: 2px; }
     .bubble.user a { color: #fff; }
     /* Badge naming the system a ticket lives in, so provider/project is visible even when the
@@ -263,9 +282,9 @@ export class Chat implements OnInit, OnDestroy {
 
   readonly suggestions = [
     'Show me my open tickets',
-    'Anything urgent right now?',
+    'What tasks do I have?',
     'Create a ticket',
-    'Update an existing ticket',
+    'Open a task for me',
   ];
 
   private nextId = 1;

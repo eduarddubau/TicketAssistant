@@ -35,8 +35,9 @@ public sealed class CompositeTicketProvider(
         => FanReadAsync(p => p.SearchTicketsAsync(query, ct), ct);
 
     public Task<IReadOnlyList<CanonicalTicket>> ListTicketsAsync(
-        TicketStatus? status = null, TicketPriority? priority = null, CancellationToken ct = default)
-        => FanReadAsync(p => p.ListTicketsAsync(status, priority, ct), ct);
+        TicketStatus? status = null, TicketPriority? priority = null, string? type = null,
+        CancellationToken ct = default)
+        => FanReadAsync(p => p.ListTicketsAsync(status, priority, type, ct), ct);
 
     public async Task<IReadOnlyList<TicketProject>> ListProjectsAsync(CancellationToken ct = default)
     {

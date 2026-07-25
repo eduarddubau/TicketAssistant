@@ -67,6 +67,7 @@ export interface JiraProject {
   provider: string;              // "jira" | "mock-ticketing" | "in-memory"
   siteName?: string | null;      // workspace/site, when the provider has that concept
   siteUrl?: string | null;
+  itemTypes?: string[] | null;   // kinds this project accepts ("Task", "Bug"…); empty if it doesn't say
 }
 
 /** Display name for a backend id, e.g. "mock-ticketing" → "Mock board". */

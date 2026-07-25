@@ -119,12 +119,22 @@ button { cursor: pointer; }
 }
 @keyframes blink { 50% { opacity: 0; } }
 
-/* The "AI glow": spin the whole gradient element. transform is animatable everywhere, unlike a
-   conic gradient's angle (which needs a Houdini @property custom property — unreliable on
-   pseudo-elements across browsers). */
-@keyframes glow-spin {
-  from { transform: translate(-50%, -50%) rotate(0deg); }
-  to { transform: translate(-50%, -50%) rotate(360deg); }
+/* The "AI glow": a conic gradient whose *angle* travels, on an element that simply fills its box.
+   This used to spin a square sized from the box's width, which only covers a bubble while it is
+   roughly as tall as it is wide — a long reply (a full ticket listing) is far taller, so the square
+   no longer reached the bottom and the glowing border broke off part-way down. An angle has no
+   size, so it fits whatever shape the bubble turns out to be.
+   Animating one needs the custom property registered below (a static gradient is the fallback
+   where that isn't supported). The earlier note about @property being unreliable was about
+   pseudo-elements; these glows are real elements, and every current engine handles them. */
+@property --sweep {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+@keyframes glow-sweep {
+  from { --sweep: 0deg; }
+  to { --sweep: 360deg; }
 }
 
 /* The user bubble's own life: its gradient fill drifts across it, and the glow beneath it

@@ -25,8 +25,11 @@ services:
       Tickets__Backends: ${TICKETS_BACKENDS:-Http}
       Tickets__Http__BaseUrl: http://ticketing-mock:8080
       Tickets__Jira__ProjectKey: ${TICKETS_JIRA_PROJECT_KEY:-}
+      # Issue type used when a create doesn't name one — "open a task for…" overrides it per item.
       Tickets__Jira__IssueType: ${TICKETS_JIRA_ISSUE_TYPE:-Task}
-      Tickets__Jira__ScopeToReporter: ${TICKETS_JIRA_SCOPE_TO_REPORTER:-true}
+      # true = only what the logged-in user raised or is assigned (was ScopeToReporter, which is
+      # still honoured if you set that key directly).
+      Tickets__Jira__ScopeToCurrentUser: ${TICKETS_JIRA_SCOPE_TO_CURRENT_USER:-true}
       # Atlassian OAuth 2.0 (3LO) app — only read when Tickets__Backends includes Jira. The redirect and
       # frontend origin default to this compose's host ports.
       Atlassian__ClientId: ${ATLASSIAN_CLIENT_ID:-}

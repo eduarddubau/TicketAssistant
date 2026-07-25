@@ -21,10 +21,14 @@ public sealed class HttpTicketProvider(HttpClient http) : ITicketProvider
     /// <summary>The mock is a single board; it presents itself as one project (its ids are PROJ-*).</summary>
     private const string MockProjectKey = "PROJ";
 
+    /// <summary>The kinds of item the mock board accepts — it takes any string, these are the offered ones.</summary>
+    private static readonly string[] MockItemTypes = [ItemTypes.Ticket, "Task"];
+
     // The mock is one board; expose it as a single project so it's a selectable create target
     // (its ids are PROJ-*). No site URL — mock ticket links come from the board template instead.
     public Task<IReadOnlyList<TicketProject>> ListProjectsAsync(CancellationToken ct = default) =>
-        Task.FromResult<IReadOnlyList<TicketProject>>([new TicketProject(MockProjectKey, "Mock board", Provider: Name)]);
+        Task.FromResult<IReadOnlyList<TicketProject>>(
+            [new TicketProject(MockProjectKey, "Mock board", Provider: Name, ItemTypes: MockItemTypes)]);
 
     public async Task<CanonicalTicket> GetTicketAsync(string ticketId, CancellationToken ct = default)
     {
@@ -41,7 +45,8 @@ public sealed class HttpTicketProvider(HttpClient http) : ITicketProvider
     }
 
     public async Task<IReadOnlyList<CanonicalTicket>> ListTicketsAsync(
-        TicketStatus? status = null, TicketPriority? priority = null, CancellationToken ct = default)
+        TicketStatus? status = null, TicketPriority? priority = null, string? type = null,
+        CancellationToken ct = default)
     {
         var query = new List<string>();
         if (status is not null) query.Add($"status={status}");
@@ -49,7 +54,9 @@ public sealed class HttpTicketProvider(HttpClient http) : ITicketProvider
         var url = "/api/tickets" + (query.Count > 0 ? "?" + string.Join("&", query) : "");
 
         var results = await http.GetFromJsonAsync<List<TicketDto>>(url, Json, ct) ?? [];
-        return results.Select(Map).ToList();
+        // Type is filtered here rather than passed to the mock: the word arrives as the user said
+        // it ("tasks"), and ItemTypes.Matches is what makes that line up with a stored "Task".
+        return results.Select(Map).Where(t => ItemTypes.Matches(t.Type, type)).ToList();
     }
 
     public async Task<CanonicalTicket> CreateTicketAsync(CreateTicketRequest request, CancellationToken ct = default)
@@ -58,6 +65,7 @@ public sealed class HttpTicketProvider(HttpClient http) : ITicketProvider
         {
             title = request.Title,
             description = request.Description,
+            type = request.Type,
             priority = request.Priority.ToString(),
             assignee = request.Assignee,
             labels = request.Labels,
@@ -130,6 +138,7 @@ public sealed class HttpTicketProvider(HttpClient http) : ITicketProvider
         Id = d.Id,
         ProviderName = Name,
         Project = MockProjectKey,
+        Type = string.IsNullOrWhiteSpace(d.Type) ? ItemTypes.Ticket : d.Type,
         Title = d.Title,
         Description = d.Description,
         Status = Enum.TryParse<TicketStatus>(d.Status, ignoreCase: true, out var s) ? s : TicketStatus.Open,
@@ -147,7 +156,7 @@ public sealed class HttpTicketProvider(HttpClient http) : ITicketProvider
     // Private DTOs mirroring TicketingMock.Api's JSON so System.Text.Json can deserialize
     // into them; Map() then translates a DTO into the app's CanonicalTicket/TicketComment.
     private sealed record TicketDto(
-        string Id, string Title, string? Description, string Status, string Priority,
+        string Id, string Title, string? Description, string? Type, string Status, string Priority,
         string? Assignee, string? Reporter, List<string>? Labels, List<string>? RelatedTo,
         DateTimeOffset CreatedAt, DateTimeOffset? UpdatedAt, DateTimeOffset? DueAt, string Url);
 

@@ -40,7 +40,7 @@ public sealed class JiraTicketProvider(
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
     private const string Fields =
-        "summary,description,status,priority,assignee,reporter,labels,created,updated,duedate,issuelinks,project";
+        "summary,description,status,priority,assignee,reporter,labels,created,updated,duedate,issuelinks,project,issuetype";
 
     public string Name => "jira";
 
@@ -58,11 +58,12 @@ public sealed class JiraTicketProvider(
     }
 
     public Task<IReadOnlyList<CanonicalTicket>> SearchTicketsAsync(string query, CancellationToken ct = default)
-        => RunJqlAsync(query, status: null, priority: null, ct);
+        => RunJqlAsync(query, status: null, priority: null, type: null, ct);
 
     public Task<IReadOnlyList<CanonicalTicket>> ListTicketsAsync(
-        TicketStatus? status = null, TicketPriority? priority = null, CancellationToken ct = default)
-        => RunJqlAsync(query: null, status, priority, ct);
+        TicketStatus? status = null, TicketPriority? priority = null, string? type = null,
+        CancellationToken ct = default)
+        => RunJqlAsync(query: null, status, priority, type, ct);
 
     public async Task<IReadOnlyList<TicketProject>> ListProjectsAsync(CancellationToken ct = default)
     {
@@ -72,13 +73,17 @@ public sealed class JiraTicketProvider(
         {
             try
             {
-                using var doc = await GetJsonAsync(access, site.CloudId, "/rest/api/3/project/search?maxResults=50&orderBy=key", ct);
+                // expand=issueTypes so each project arrives with the kinds of item it accepts —
+                // one round trip instead of a createmeta call per project.
+                using var doc = await GetJsonAsync(
+                    access, site.CloudId, "/rest/api/3/project/search?maxResults=50&orderBy=key&expand=issueTypes", ct);
                 if (doc is null || !doc.RootElement.TryGetProperty("values", out var values) || values.ValueKind != JsonValueKind.Array)
                     continue;
                 projects.AddRange(values.EnumerateArray()
                     .Select(v => new TicketProject(
                         v.GetProperty("key").GetString() ?? "", v.GetProperty("name").GetString() ?? "",
-                        Provider: Name, SiteName: site.Name, SiteUrl: site.SiteUrl))
+                        Provider: Name, SiteName: site.Name, SiteUrl: site.SiteUrl,
+                        ItemTypes: ExtractIssueTypeNames(v)))
                     .Where(p => p.Key.Length > 0));
             }
             catch (Exception ex)
@@ -89,16 +94,20 @@ public sealed class JiraTicketProvider(
         return projects;
     }
 
-    // Reads span every site the token can reach, merged and sorted. Narrowed only by reporter
-    // (when scoped) and — for search — a free-text match; status/priority are filtered in memory,
-    // since the app's five statuses don't line up 1:1 with Jira's workflow states.
+    // Reads span every site the token can reach, merged and sorted. Narrowed only by the user
+    // (when scoped) and — for search — a free-text match; status/priority/type are filtered in
+    // memory, since the app's five statuses don't line up 1:1 with Jira's workflow states and a
+    // type filter arrives as whatever word the user used ("tasks").
     private async Task<IReadOnlyList<CanonicalTicket>> RunJqlAsync(
-        string? query, TicketStatus? status, TicketPriority? priority, CancellationToken ct)
+        string? query, TicketStatus? status, TicketPriority? priority, string? type, CancellationToken ct)
     {
         var access = await resolver.ResolveAsync(ct);
 
         var clauses = new List<string>();
-        if (options.ScopeToReporter) clauses.Add("reporter = currentUser()");
+        // "Mine" means anything I raised *or* anything landed on my plate — a task someone else
+        // filed and assigned to me is very much the user's business, so scoping to reporter alone
+        // would hide exactly the work they're most likely to ask about.
+        if (options.ScopeToCurrentUser) clauses.Add("(reporter = currentUser() OR assignee = currentUser())");
         if (!string.IsNullOrWhiteSpace(query)) clauses.Add($"text ~ \"{EscapeJql(query)}\"");
         var jql = (clauses.Count > 0 ? string.Join(" AND ", clauses) + " " : "") + "ORDER BY created DESC";
         var url = $"/rest/api/3/search/jql?jql={Uri.EscapeDataString(jql)}&fields={Fields}&maxResults=100";
@@ -122,6 +131,7 @@ public sealed class JiraTicketProvider(
         return tickets
             .Where(t => status is null || t.Status == status)
             .Where(t => priority is null || t.Priority == priority)
+            .Where(t => ItemTypes.Matches(t.Type, type))
             .OrderByDescending(t => t.CreatedAt)
             .ToList();
     }
@@ -143,10 +153,16 @@ public sealed class JiraTicketProvider(
 
         var (cloudId, siteUrl) = await FindProjectSiteAsync(access, projectKey, ct);
 
+        // The kind of item is the caller's call too ("open a task for…" vs "file a bug"), falling
+        // back to the configured default. Jira rejects a type the project's scheme doesn't define,
+        // and its error names the valid ones — which is the honest failure here, since only the
+        // project knows its types (list_projects reports them).
+        var issueType = !string.IsNullOrWhiteSpace(request.Type) ? request.Type.Trim() : options.IssueType;
+
         var fields = new Dictionary<string, object?>
         {
             ["project"] = new { key = projectKey },
-            ["issuetype"] = new { name = options.IssueType },
+            ["issuetype"] = new { name = issueType },
             ["summary"] = request.Title,
             ["priority"] = new { name = MapPriorityToJira(request.Priority) },
             ["labels"] = request.Labels.Select(SanitizeLabel).ToArray(),
@@ -370,6 +386,9 @@ public sealed class JiraTicketProvider(
             // Prefer the issue's own project field; fall back to the key prefix ("SUP-12" → "SUP").
             Project = GetNested(f, "project", "key")
                       ?? (key.LastIndexOf('-') is > 0 and var dash ? key[..dash] : null),
+            // Jira's own issue type, verbatim ("Task", "Bug", "Story"), so the assistant can keep
+            // tasks and tickets apart instead of calling everything a ticket.
+            Type = GetNested(f, "issuetype", "name") ?? options.IssueType,
             Title = f.GetProperty("summary").GetString() ?? "",
             Description = f.TryGetProperty("description", out var d) ? TextFromAdf(d) : null,
             Status = MapStatusFromJira(f.GetProperty("status")),
@@ -451,6 +470,22 @@ public sealed class JiraTicketProvider(
     // survives instead of being rejected.
     private static string SanitizeLabel(string label) =>
         string.Join('-', label.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+
+    // The issue types a project accepts, from its expanded issueTypes array. Sub-task types are
+    // dropped: they can't exist without a parent, so offering one as a create target would only
+    // produce a Jira error.
+    private static IReadOnlyList<string> ExtractIssueTypeNames(JsonElement project)
+    {
+        if (!project.TryGetProperty("issueTypes", out var types) || types.ValueKind != JsonValueKind.Array)
+            return [];
+
+        return types.EnumerateArray()
+            .Where(t => !(t.TryGetProperty("subtask", out var sub) && sub.ValueKind == JsonValueKind.True))
+            .Select(t => t.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "")
+            .Where(n => n.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
 
     // Pulls the other end's key out of each issue link (a link stores the *other* issue under
     // inwardIssue or outwardIssue depending on direction).

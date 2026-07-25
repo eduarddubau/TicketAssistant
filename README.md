@@ -31,10 +31,14 @@ still needs, warns you if a similar ticket already exists, and hands back a **co
 can edit** — title, description, severity, and which system and project it should land in. Approve it
 and the ticket is created for real; say *"undo that"* and it's reversed.
 
-It also keeps track of what you already have: **look up · search · list by status or priority ·
+It also keeps track of what you already have: **look up · search · list by status, priority or kind ·
 summarize where everything stands · reopen · comment · assign · resolve with a note · set due dates
 and flag anything overdue · undo the last change.** Every ticket keeps an audit trail of what changed
 and when.
+
+That's everything you raised **and everything assigned to you**, of every kind — tickets, tasks,
+bugs, stories — kept apart rather than lumped together, so *"what tasks do I have?"* and *"open a
+task for that"* mean what they say.
 
 Two things it is deliberately not shy about:
 
@@ -118,8 +122,12 @@ container when the LLM runs locally:
   *instead of* honest), and each chat opens with one of several fixed openers that name what the
   assistant can do and end with a direct instruction — because warmth alone leaves people staring at
   an empty box.
-- **Per-user scoping**, and a **local GPU/CPU choice** for Ollama that's auto-detected at startup and
-  switchable live from the console.
+- **Kinds are kept honest.** A task is not a ticket: the backend's own type comes through verbatim,
+  reads arrive grouped by kind *and* by system (so demo data can't pass for real work), and a create
+  files the kind you asked for — with the confirmation card offering only the kinds that project
+  actually accepts.
+- **Per-user scoping** — what you raised *or* were assigned — and a **local GPU/CPU choice** for
+  Ollama that's auto-detected at startup and switchable live from the console.
 - **A trace you can read.** A togglable [debug console](#the-debug-console) streams the whole turn —
   system prompt, exact context, raw reply, every tool call and guardrail — beside the chat, so none
   of the above has to be taken on faith. Opt-in per request, so it costs nothing when it's closed.
@@ -214,7 +222,7 @@ Set via `appsettings.json`, environment variables, or `.env` (copy from `.env.ex
 | `Tickets:Backends` | Which backends run **together** (space/comma separated): `Http` (the mock) · `Jira` · `InMemory`, e.g. `Http Jira` | `Http` |
 | `Atlassian:ClientId` / `:ClientSecret` | OAuth 2.0 (3LO) app credentials — required for `Jira` | — |
 | `Atlassian:RedirectUri` / `:FrontendOrigin` | OAuth callback URL and the console's origin | `…:5080/api/auth/jira/callback` / `…:4200` |
-| `Tickets:Jira:ProjectKey` | *Optional* default project for new tickets (otherwise chosen per ticket in the UI); also `:IssueType` / `:ScopeToReporter` | — |
+| `Tickets:Jira:ProjectKey` | *Optional* default project for new tickets (otherwise chosen per ticket in the UI); also `:IssueType` (kind used when a create doesn't name one) / `:ScopeToCurrentUser` | — |
 | `OLLAMA_GPU_DEVICE` (`.env`, compose only) | Device handed to the Ollama container; the up scripts set it automatically | empty = CPU |
 | `OLLAMA_KEEP_ALIVE` (`.env`, compose only) | How long a model stays loaded when idle; `-1` never unloads it, so no message ever pays the ~1 min reload | `-1` |
 
@@ -265,7 +273,8 @@ the Jira tokens (and their refresh) never leave the server. See
 What the provider maps for you: plain text ↔ **ADF** (Jira's rich body format) for descriptions and
 comments; the app's priorities ↔ Jira's `Highest…Lowest`; a status change ↔ the matching **workflow
 transition** (Jira won't let you set a status directly); an assignee name/email ↔ a Jira `accountId`
-via user search; and "related" tickets ↔ best-effort *Relates* issue links.
+via user search; Jira **issue types** ↔ the assistant's item kinds (carried through verbatim, so a
+`Task` stays a task); and "related" tickets ↔ best-effort *Relates* issue links.
 
 Worth knowing:
 
@@ -273,9 +282,15 @@ Worth knowing:
   site hosting the target project or issue. This assumes **project keys are unique across your
   sites** (the norm) — a colliding key resolves to the first site found. Needs **Account-level**
   access; Resource-level grants just the one selected site.
-- **Genuinely per-user.** Each session acts as its own logged-in account, so `ScopeToReporter`
-  (default `true`) means "only tickets you raised". Set `TICKETS_JIRA_SCOPE_TO_REPORTER=false` to
-  include everything the account can see.
+- **Genuinely per-user.** Each session acts as its own logged-in account, so `ScopeToCurrentUser`
+  (default `true`) means "only what you raised or were assigned" — JQL
+  `reporter = currentUser() OR assignee = currentUser()`, so a task someone else filed and put your
+  name on shows up. Set `TICKETS_JIRA_SCOPE_TO_CURRENT_USER=false` to include everything the account
+  can see. (The old `ScopeToReporter` key still works.)
+- **Every issue type, kept apart.** Reads bring back tasks, bugs, stories and tickets alike, grouped
+  by kind *and* site rather than lumped together, and a create files the kind you asked for
+  (`:IssueType` is only the fallback when you don't say). Each project reports the types its scheme
+  actually defines, so the create card offers only those.
 - **Status transitions depend on your workflow.** A status change only works if the ticket's current
   status has a transition reaching the target; otherwise you get a clear error naming the target.
   `Blocked`/`Closed` need a workflow that actually has those states.

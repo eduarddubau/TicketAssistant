@@ -46,6 +46,17 @@ export class ProjectsService {
     )];
   }
 
+  /**
+   * The kinds of item a project accepts ("Task", "Bug"…). Empty when the backend doesn't publish
+   * them, which the caller reads as "don't offer a choice" rather than "no kinds exist" — a create
+   * with no kind named lands on the backend's own default.
+   */
+  itemTypesFor(projectKey: string | null | undefined): string[] {
+    if (!projectKey) return [];
+    const key = projectKey.toUpperCase();
+    return this.projects().find((p) => p.key.toUpperCase() === key)?.itemTypes ?? [];
+  }
+
   /** Projects within a provider (and site, when it has them). */
   projectsFor(provider: string, site?: string | null): JiraProject[] {
     return this.projects().filter(

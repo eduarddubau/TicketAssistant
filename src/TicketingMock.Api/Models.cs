@@ -10,6 +10,14 @@ public sealed class MockTicket
     public required string Id { get; set; }
     public required string Title { get; set; }
     public string? Description { get; set; }
+
+    /// <summary>
+    /// What kind of item this is — "Ticket" or "Task" on this board (a real system would have its
+    /// own set, e.g. Jira's issue types). Kept as a string for the same reason status is: it's
+    /// the external system's vocabulary, and the assistant maps it.
+    /// </summary>
+    public string Type { get; set; } = "Ticket";
+
     public string Status { get; set; } = "Open";
     public string Priority { get; set; } = "Medium";
     public string? Assignee { get; set; }
@@ -41,7 +49,7 @@ public sealed record MockEvent(string Description, DateTimeOffset At);
 // Request bodies accepted by the API.
 public sealed record CreateTicketBody(
     string Title, string? Description, string? Priority, string? Assignee, List<string>? Labels,
-    List<string>? RelatedTo = null);
+    List<string>? RelatedTo = null, string? Type = null);
 public sealed record UpdateStatusBody(string Status);
 public sealed record UpdateAssigneeBody(string? Assignee);
 public sealed record UpdateDueBody(DateTimeOffset? DueAt);

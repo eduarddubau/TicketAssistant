@@ -35,6 +35,9 @@
     .st-Blocked { background: #dc262620; color: #dc2626; }
     .st-Resolved { background: #16a34a20; color: #16a34a; }
     .st-Closed { background: color-mix(in srgb, CanvasText 15%, transparent); color: CanvasText; }
+    /* The kind of item (ticket / task) leads the badge row: with both on one board, "which is
+       this?" is the first thing you need to know. */
+    .ty { background: color-mix(in srgb, #8b5cf6 18%, transparent); color: #8b5cf6; }
     .pr { border: 1px solid currentColor; }
     .pr-Low { color: #6b7280; } .pr-Medium { color: #3b82f6; } .pr-High { color: #f59e0b; } .pr-Urgent { color: #dc2626; }
     .desc { font-size: .9rem; opacity: .8; margin: 0; }
@@ -91,6 +94,7 @@
         <div class="top"><span class="id">${esc(t.id)}</span></div>
         <h2>${esc(t.title)}</h2>
         <div class="badges">
+          <span class="badge ty">${esc(t.type || 'Ticket')}</span>
           <span class="badge st-${esc(t.status)}">${esc(t.status)}</span>
           <span class="badge pr pr-${esc(t.priority)}">${esc(t.priority)}</span>
         </div>
@@ -114,8 +118,9 @@
         const tickets = await res.json();
         board.innerHTML = tickets.length
           ? tickets.map(card).join('')
-          : '<div class="empty">No tickets yet — create one from the assistant.</div>';
-        countEl.textContent = tickets.length + ' ticket' + (tickets.length === 1 ? '' : 's');
+          : '<div class="empty">Nothing here yet — create a ticket or a task from the assistant.</div>';
+        // "items", not "tickets": tasks live on this board too.
+        countEl.textContent = tickets.length + ' item' + (tickets.length === 1 ? '' : 's');
         seen = new Set(tickets.map(t => t.id));
         first = false;
       } catch (e) {

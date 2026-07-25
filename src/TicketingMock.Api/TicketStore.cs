@@ -8,7 +8,8 @@ namespace TicketingMock.Api;
 /// links so the assistant can hand the user a URL that opens this app's board.
 ///
 /// Reads and writes are scoped by <c>owner</c> (the X-User-Id passed by the caller): a
-/// null/empty owner sees everything (the admin board), otherwise only that user's tickets.
+/// null/empty owner sees everything (the admin board), otherwise the tickets that user
+/// <i>created or is assigned</i> — work landed on someone's plate is theirs to see too.
 /// This is a test-only stand-in for real per-user authorization.
 /// </summary>
 public sealed class TicketStore
@@ -23,26 +24,33 @@ public sealed class TicketStore
         Seed();
     }
 
-    private static bool OwnedBy(MockTicket ticket, string? owner) =>
-        string.IsNullOrEmpty(owner) || string.Equals(ticket.Owner, owner, StringComparison.OrdinalIgnoreCase);
+    // A user's own work is what they created *or* what is assigned to them — someone else filing a
+    // task and putting your name on it makes it yours to see. An empty owner is the admin board.
+    private static bool VisibleTo(MockTicket ticket, string? owner) =>
+        string.IsNullOrEmpty(owner)
+        || string.Equals(ticket.Owner, owner, StringComparison.OrdinalIgnoreCase)
+        || string.Equals(ticket.Assignee, owner, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
-    /// The owner's tickets, optionally filtered by status and/or priority (case-insensitive;
+    /// The user's tickets, optionally filtered by status, priority and/or type (case-insensitive;
     /// null/empty means "don't filter on this"). Backs both the board and the assistant's
     /// list_tickets tool — the structured alternative to free-text search.
     /// </summary>
-    public IReadOnlyList<MockTicket> All(string? owner, string? status = null, string? priority = null) =>
+    public IReadOnlyList<MockTicket> All(
+        string? owner, string? status = null, string? priority = null, string? type = null) =>
         _tickets.Values
-            .Where(t => OwnedBy(t, owner))
+            .Where(t => VisibleTo(t, owner))
             .Where(t => string.IsNullOrWhiteSpace(status)
                         || string.Equals(t.Status, status, StringComparison.OrdinalIgnoreCase))
             .Where(t => string.IsNullOrWhiteSpace(priority)
                         || string.Equals(t.Priority, priority, StringComparison.OrdinalIgnoreCase))
+            .Where(t => string.IsNullOrWhiteSpace(type)
+                        || string.Equals(t.Type, type, StringComparison.OrdinalIgnoreCase))
             .OrderByDescending(t => t.CreatedAt)
             .ToList();
 
     public MockTicket? Get(string id, string? owner) =>
-        _tickets.TryGetValue(id, out var ticket) && OwnedBy(ticket, owner) ? ticket : null;
+        _tickets.TryGetValue(id, out var ticket) && VisibleTo(ticket, owner) ? ticket : null;
 
     public IReadOnlyList<MockTicket> Search(string query, string? owner)
     {
@@ -52,7 +60,7 @@ public sealed class TicketStore
         }
 
         return _tickets.Values
-            .Where(t => OwnedBy(t, owner))
+            .Where(t => VisibleTo(t, owner))
             .Where(t => t.Title.Contains(query, StringComparison.OrdinalIgnoreCase)
                         || (t.Description?.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false)
                         || t.Labels.Any(l => l.Contains(query, StringComparison.OrdinalIgnoreCase)))
@@ -68,10 +76,13 @@ public sealed class TicketStore
             Id = id,
             Title = body.Title,
             Description = body.Description,
+            Type = string.IsNullOrWhiteSpace(body.Type) ? "Ticket" : body.Type.Trim(),
             Status = "Open",
             Priority = string.IsNullOrWhiteSpace(body.Priority) ? "Medium" : body.Priority,
             Assignee = body.Assignee,
-            Reporter = "ticket-assistant",
+            // The creator is the reporter here; with reads scoped to creator-or-assignee, saying
+            // "ticket-assistant" raised everything would hide who actually asked for it.
+            Reporter = string.IsNullOrWhiteSpace(owner) ? "ticket-assistant" : owner,
             Owner = owner,
             Labels = body.Labels ?? [],
             RelatedTo = body.RelatedTo ?? [],
@@ -79,7 +90,8 @@ public sealed class TicketStore
             Url = $"{_publicBaseUrl}/#{id}"
         };
 
-        ticket.History.Add(new MockEvent($"created with priority {ticket.Priority}", ticket.CreatedAt));
+        ticket.History.Add(new MockEvent(
+            $"created as {ticket.Type.ToLowerInvariant()} with priority {ticket.Priority}", ticket.CreatedAt));
         _tickets[id] = ticket;
         return ticket;
     }
@@ -167,8 +179,10 @@ public sealed class TicketStore
         return true;
     }
 
-    // Demo data owned by "alice" so the default console user sees a populated board;
-    // switch the user in the console to see isolation (a different user starts empty).
+    // Demo data "alice" (the default console user) can see, so the board isn't empty; switch the
+    // user in the console to see isolation. Deliberately a mix: tickets and tasks, so the two kinds
+    // are distinguishable in a listing, and one task alice didn't create but is assigned — the case
+    // creator-only scoping used to hide.
     private void Seed()
     {
         Create(new CreateTicketBody(
@@ -180,5 +194,15 @@ public sealed class TicketStore
             "Add dark mode to settings",
             "Feature request: a dark theme toggle on the settings screen.",
             "Low", null, ["enhancement", "ui"]), owner: "alice");
+
+        Create(new CreateTicketBody(
+            "Write the release notes for 2.4",
+            "Summarize what shipped in 2.4 and post them to the changelog.",
+            "Medium", "alice", ["release"], Type: "Task"), owner: "alice");
+
+        Create(new CreateTicketBody(
+            "Review the new on-call rota",
+            "Morgan drafted next quarter's rota and needs a second pair of eyes.",
+            "Low", "alice", ["process"], Type: "Task"), owner: "morgan");
     }
 }

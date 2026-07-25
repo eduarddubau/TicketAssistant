@@ -13,8 +13,8 @@ app.UseStaticFiles();
 static string? Owner(HttpRequest request) => request.Headers["X-User-Id"].ToString() is { Length: > 0 } id ? id : null;
 
 // List / search must be declared so the literal "search" segment is matched before "{id}".
-app.MapGet("/api/tickets", (string? status, string? priority, HttpRequest req, TicketStore store) =>
-    store.All(Owner(req), status, priority));
+app.MapGet("/api/tickets", (string? status, string? priority, string? type, HttpRequest req, TicketStore store) =>
+    store.All(Owner(req), status, priority, type));
 
 app.MapGet("/api/tickets/search", (string? q, HttpRequest req, TicketStore store) => store.Search(q ?? "", Owner(req)));
 

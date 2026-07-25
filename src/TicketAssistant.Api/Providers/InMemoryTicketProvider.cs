@@ -18,9 +18,13 @@ public sealed class InMemoryTicketProvider : ITicketProvider
     /// <summary>Single synthetic project, mirroring the mock board (ids are PROJ-*).</summary>
     private const string MockProjectKey = "PROJ";
 
+    /// <summary>The kinds of item this stub offers, mirroring the mock board's two.</summary>
+    private static readonly string[] StubItemTypes = [ItemTypes.Ticket, "Task"];
+
     // A single synthetic project so this backend is a selectable create target (ids are PROJ-*).
     public Task<IReadOnlyList<TicketProject>> ListProjectsAsync(CancellationToken ct = default) =>
-        Task.FromResult<IReadOnlyList<TicketProject>>([new TicketProject(MockProjectKey, "In-memory board", Provider: Name)]);
+        Task.FromResult<IReadOnlyList<TicketProject>>(
+            [new TicketProject(MockProjectKey, "In-memory board", Provider: Name, ItemTypes: StubItemTypes)]);
 
     public Task<CanonicalTicket> GetTicketAsync(string ticketId, CancellationToken ct = default)
     {
@@ -43,11 +47,13 @@ public sealed class InMemoryTicketProvider : ITicketProvider
     }
 
     public Task<IReadOnlyList<CanonicalTicket>> ListTicketsAsync(
-        TicketStatus? status = null, TicketPriority? priority = null, CancellationToken ct = default)
+        TicketStatus? status = null, TicketPriority? priority = null, string? type = null,
+        CancellationToken ct = default)
     {
         IReadOnlyList<CanonicalTicket> matches = _tickets.Values
             .Where(t => status is null || t.Status == status)
             .Where(t => priority is null || t.Priority == priority)
+            .Where(t => ItemTypes.Matches(t.Type, type))
             .OrderByDescending(t => t.CreatedAt)
             .ToList();
 
@@ -62,6 +68,7 @@ public sealed class InMemoryTicketProvider : ITicketProvider
             Id = id,
             ProviderName = Name,
             Project = MockProjectKey,
+            Type = string.IsNullOrWhiteSpace(request.Type) ? ItemTypes.Ticket : request.Type.Trim(),
             Title = request.Title,
             Description = request.Description,
             Status = TicketStatus.Open,
@@ -88,6 +95,7 @@ public sealed class InMemoryTicketProvider : ITicketProvider
             Id = existing.Id,
             ProviderName = existing.ProviderName,
             Project = existing.Project,
+            Type = existing.Type,
             Title = existing.Title,
             Description = existing.Description,
             Status = status,
@@ -116,6 +124,7 @@ public sealed class InMemoryTicketProvider : ITicketProvider
             Id = existing.Id,
             ProviderName = existing.ProviderName,
             Project = existing.Project,
+            Type = existing.Type,
             Title = existing.Title,
             Description = existing.Description,
             Status = existing.Status,
@@ -155,6 +164,7 @@ public sealed class InMemoryTicketProvider : ITicketProvider
             Id = existing.Id,
             ProviderName = existing.ProviderName,
             Project = existing.Project,
+            Type = existing.Type,
             Title = existing.Title,
             Description = existing.Description,
             Status = existing.Status,

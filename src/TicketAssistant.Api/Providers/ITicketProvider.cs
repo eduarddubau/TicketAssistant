@@ -28,12 +28,17 @@ public interface ITicketProvider
         Task.FromResult<IReadOnlyList<TicketProject>>([]);
 
     /// <summary>
-    /// List the caller's tickets, optionally narrowed by status and/or priority. This is the
-    /// structured counterpart to <see cref="SearchTicketsAsync"/> — use it for "my open
-    /// tickets" or "anything urgent", which free-text search cannot answer.
+    /// List the caller's tickets, optionally narrowed by status, priority and/or item type. This
+    /// is the structured counterpart to <see cref="SearchTicketsAsync"/> — use it for "my open
+    /// tickets", "anything urgent" or "my tasks", which free-text search cannot answer.
     /// </summary>
+    /// <param name="type">
+    /// Item type to keep, in the backend's words ("Task", "Bug"…); matched loosely, so a plural or
+    /// a different case still works. Null/empty returns every kind.
+    /// </param>
     Task<IReadOnlyList<CanonicalTicket>> ListTicketsAsync(
-        TicketStatus? status = null, TicketPriority? priority = null, CancellationToken ct = default);
+        TicketStatus? status = null, TicketPriority? priority = null, string? type = null,
+        CancellationToken ct = default);
 
     /// <summary>Create a new ticket and return it (with its assigned id/URL).</summary>
     Task<CanonicalTicket> CreateTicketAsync(CreateTicketRequest request, CancellationToken ct = default);

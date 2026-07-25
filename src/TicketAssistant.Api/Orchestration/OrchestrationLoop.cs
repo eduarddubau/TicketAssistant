@@ -602,7 +602,11 @@ public sealed class OrchestrationLoop(
                             var duplicates = await FindSimilarTicketsAsync(ArgString(arguments, "title"), ct);
                             if (duplicates.Count > 0)
                             {
-                                var list = string.Join("; ", duplicates.Select(t => $"{t.Id} \"{t.Title}\" (status {t.Status})"));
+                                // The kind is part of the identity here: "you already have a Task
+                                // for that" is a different conversation from "a Bug", and the user
+                                // may well want the other kind anyway.
+                                var list = string.Join("; ", duplicates.Select(
+                                    t => $"{t.Id} \"{t.Title}\" ({t.Type} in {t.Source}, status {t.Status})"));
                                 logger.LogInformation(
                                     "Blocked create_ticket: {DuplicateCount} possible duplicate(s) of \"{Title}\": {Duplicates}",
                                     duplicates.Count, ArgString(arguments, "title"), list);
@@ -621,11 +625,12 @@ public sealed class OrchestrationLoop(
                                 }
                                 messages.Add(new ChatMessage(ChatRole.Tool, [new FunctionResultContent(
                                     call.CallId,
-                                    $"This user already has a ticket for what looks like the same issue: {list}. " +
-                                    "Do not create a duplicate. Tell the user about the existing ticket and ask whether " +
-                                    "they want to reopen it (set its status to Open), add an update/comment to it, or " +
-                                    "create a separate new ticket. Only if they choose a new one, call create_ticket " +
-                                    "again with createAnyway set to true.")]));
+                                    $"This user already has something for what looks like the same issue: {list}. " +
+                                    "Do not create a duplicate. Tell the user what already exists — naming what kind " +
+                                    "of item it is and which system it is in — and ask whether they want to reopen it " +
+                                    "(set its status to Open), add an update/comment to it, or create a separate new " +
+                                    "one. Only if they choose a new one, call create_ticket again with createAnyway " +
+                                    "set to true.")]));
                                 continue;
                             }
                         }

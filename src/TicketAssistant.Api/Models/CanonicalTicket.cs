@@ -17,8 +17,8 @@ public sealed class CanonicalTicket
     public string Source => ProviderName switch
     {
         "jira" => "Jira",
-        "mock-ticketing" => "the mock board (demo data, not a real ticket)",
-        "in-memory" => "the in-memory stub (demo data, not a real ticket)",
+        "mock-ticketing" => "the mock board (demo data, not real work)",
+        "in-memory" => "the in-memory stub (demo data, not real work)",
         var other => other
     };
 
@@ -28,6 +28,22 @@ public sealed class CanonicalTicket
     /// model — where a ticket actually lives.
     /// </summary>
     public string? Project { get; init; }
+
+    /// <summary>
+    /// What kind of item this is, in the backend's own words: "Task", "Bug", "Story", "Ticket".
+    /// A free string rather than an enum because Jira projects define their own issue types — and
+    /// a task really is a different thing from a bug report, so the assistant must not flatten
+    /// them into one word. Reads are grouped by this (see <see cref="TypePlural"/>) and creates
+    /// choose it, which is what makes "create a task" different from "create a ticket".
+    /// </summary>
+    public required string Type { get; init; }
+
+    /// <summary>
+    /// <see cref="Type"/> pluralized for a heading — "Task" -> "Tasks". Serialized with the
+    /// ticket for the same reason as <see cref="Source"/>: a small model reliably copies a phrase
+    /// a tool handed it, and much less reliably derives one.
+    /// </summary>
+    public string TypePlural => ItemTypes.Plural(Type);
 
     public required string Title { get; init; }
     public string? Description { get; init; }

@@ -39,38 +39,94 @@ public static class TicketTools
     public static bool RequiresConfirmation(string toolName) => ConfirmationRequiredTools.Contains(toolName);
 
     /// <summary>
-    /// One system's share of a read result: the plain-English name of the backend, and the tickets
-    /// that live in it.
+    /// One slice of a read result: everything of one kind ("Tasks", "Bugs") in one system — the
+    /// heading that says so, and its items already written out as the lines the answer should show.
     /// </summary>
-    private sealed record TicketGroup(string Source, IReadOnlyList<CanonicalTicket> Tickets);
+    private sealed record TicketGroup(string Heading, IReadOnlyList<string> Items);
 
-    /// <summary>A read result: how to present it, and the tickets grouped by the system they live in.</summary>
-    private sealed record GroupedTickets(string Instructions, IReadOnlyList<TicketGroup> BySource);
+    /// <summary>
+    /// A read result: how to present it, and the items grouped by what they are and where they live.
+    /// </summary>
+    private sealed record GroupedTickets(string Instructions, IReadOnlyList<TicketGroup> Groups);
 
     /// <summary>
     /// Carried at the top of every grouped read. Instructions travel with the data rather than
     /// sitting only in the tool description or the system prompt, because that is the one place a
     /// 3B model reliably reads them — the same reason the duplicate guardrail spells out what to do
     /// inside its tool result instead of trusting the standing instructions.
+    ///
+    /// A worked example, not a rule: told in prose to keep lines short, a 3B model reproduced the
+    /// JSON it had been handed instead — every field of every ticket, under invented headings like
+    /// "Group 1" and "Section Heading". Shown the exact output shape, it copies it.
     /// </summary>
     private const string GroupedTicketsInstructions =
-        "One section per bySource group: its 'source' text copied exactly as the heading, then that " +
-        "group's tickets as one short line each (id, title, status, priority). Some groups are demo " +
-        "data, so never merge groups or drop a source.";
+        """
+        Write the answer exactly like this — one bold line per entry in 'groups' (its 'heading',
+        copied word for word), then that group's 'items' as bullets, each string copied as it is:
+
+        **Tasks in Jira**
+        - SCRUM-1 · test task — Open, Medium
+        - HELP-2 · Internet is down — Open, Urgent
+
+        **Tickets in the mock board (demo data, not real work)**
+        - PROJ-1001 · Login page returns 500 on submit — Open, High
+
+        Keep every group and every item, in the order given. At most one short sentence of your own
+        before the list (and a word about anything OVERDUE after it). Never add fields, never print
+        field names, JSON, timestamps or URLs, and never invent headings like "Group 1" or
+        "Section Heading". If 'groups' is empty, just say nothing matched.
+        """;
 
     /// <summary>
-    /// Groups a fanned-out read by the system each ticket came from, so the answer can't quietly
-    /// present demo tickets as real ones. Shape does the work that wording couldn't: told to
-    /// mention a per-ticket "source" field, a small model drops it from a flat array no matter how
-    /// firmly the tool description asks — but it keeps headings it was handed. Ordered by source so
-    /// repeated questions come back in a stable order.
+    /// Groups a fanned-out read by kind *and* by the system each item came from — so an answer can
+    /// neither pass demo tickets off as real ones nor blur tasks together with tickets. Shape does
+    /// the work that wording couldn't: handed structured tickets, a small model either drops the
+    /// fields that matter or dumps every one it was given — so a listing hands it finished lines
+    /// (see <see cref="Line"/>) and a heading per group, leaving only the copying to do. Details
+    /// beyond the line (description, labels, reporter, links) come from get_ticket, which still
+    /// returns the whole ticket. Ordered by heading so repeated questions come back the same way.
     /// </summary>
-    private static GroupedTickets GroupBySource(IEnumerable<CanonicalTicket> tickets) =>
+    private static GroupedTickets GroupByKindAndSource(IEnumerable<CanonicalTicket> tickets) =>
         new(GroupedTicketsInstructions,
-            tickets.GroupBy(t => t.Source, StringComparer.Ordinal)
-                   .OrderBy(g => g.Key, StringComparer.Ordinal)
-                   .Select(g => new TicketGroup(g.Key, g.ToList()))
+            tickets.GroupBy(t => (t.TypePlural, t.Source))
+                   .Select(g => new TicketGroup(
+                       Heading: $"{g.Key.TypePlural} in {g.Key.Source}",
+                       Items: g.Select(Line).ToList()))
+                   .OrderBy(g => g.Heading, StringComparer.Ordinal)
                    .ToList());
+
+    /// <summary>
+    /// One ticket as the single line a listing should show: id, title, status, priority, and only
+    /// what else is genuinely news — the project when the id doesn't already give it away, and a due
+    /// date, shouted when it has passed. Everything else is left out on purpose: whatever a listing
+    /// carries is what the model will print.
+    /// </summary>
+    private static string Line(CanonicalTicket t)
+    {
+        var line = $"{t.Id} · {t.Title} — {StatusText(t.Status)}, {t.Priority}";
+
+        if (!string.IsNullOrWhiteSpace(t.Project)
+            && !t.Id.StartsWith(t.Project + "-", StringComparison.OrdinalIgnoreCase))
+        {
+            line += $", project {t.Project}";
+        }
+
+        if (t.DueAt is { } due)
+        {
+            line += IsOverdue(t) ? $", OVERDUE (was due {due:yyyy-MM-dd})" : $", due {due:yyyy-MM-dd}";
+        }
+
+        return line;
+    }
+
+    /// <summary>Past its due date and not finished — the one thing a listing should raise its voice about.</summary>
+    private static bool IsOverdue(CanonicalTicket t) =>
+        t.DueAt is { } due && due < DateTimeOffset.UtcNow
+        && t.Status is not (TicketStatus.Resolved or TicketStatus.Closed);
+
+    /// <summary>The enum name as a person writes it, so "InProgress" doesn't reach the user verbatim.</summary>
+    private static string StatusText(TicketStatus status) =>
+        status == TicketStatus.InProgress ? "In progress" : status.ToString();
 
     /// <summary>
     /// Parses a loose string into an enum, case-insensitively, returning null for empty or
@@ -105,7 +161,7 @@ public static class TicketTools
                     return $"Undone: {action.Description}";
                 },
                 name: UndoToolName,
-                description: "Reverse the most recent change you made for this user — deletes a ticket " +
+                description: "Reverse the most recent change you made for this user — deletes an item " +
                               "you just created, restores a previous status or assignee, or removes a " +
                               "comment you just added. Only the single most recent change can be undone. " +
                               "Use when the user says something like 'undo that' or 'never mind'."),
@@ -113,18 +169,20 @@ public static class TicketTools
             AIFunctionFactory.Create(
                 (string ticketId, CancellationToken ct) => provider.GetTicketAsync(ticketId, ct),
                 name: "get_ticket",
-                description: "Fetch a single ticket by its provider-native ID (e.g. 'PROJ-1001')."),
+                description: "Fetch a single ticket or task by its provider-native ID (e.g. 'PROJ-1001'). " +
+                              "The result's 'type' says which kind of item it is."),
 
             AIFunctionFactory.Create(
                 async (string query, CancellationToken ct) =>
-                    GroupBySource(await provider.SearchTicketsAsync(query, ct)),
+                    GroupByKindAndSource(await provider.SearchTicketsAsync(query, ct)),
                 name: "search_tickets",
-                description: "Search tickets by words appearing in their title, description or labels " +
-                              "(e.g. 'login', 'printer'). This matches text only — to filter by status " +
-                              "or priority use list_tickets instead. Matches span every connected system, " +
-                              "so they come back grouped: each group has a 'source' naming the system its " +
-                              "'tickets' live in. Keep the groups when you answer — give every match its " +
-                              "project, and quote its group's 'source' word for word."),
+                description: "Search everything assigned to or raised by the user — tickets, tasks, and " +
+                              "any other kind of item — by words in their title, description or labels " +
+                              "(e.g. 'login', 'printer'). This matches text only — to filter by status, " +
+                              "priority or kind use list_tickets instead. Matches come back in 'groups', " +
+                              "one per kind of item per system, each with a 'heading' and its 'items' " +
+                              "already written as the lines to show. Follow the 'instructions' in the " +
+                              "result exactly: copy the headings and lines, and add nothing to them."),
 
             AIFunctionFactory.Create(
                 // status/priority are taken as loose strings and parsed case-insensitively rather
@@ -132,27 +190,32 @@ public static class TicketTools
                 // otherwise fail argument binding before the tool even runs.
                 // Defaults matter as much as nullability here: a parameter without one is treated
                 // as *required*, so a model omitting it fails argument binding before the tool runs.
-                async (string? status = null, string? priority = null, CancellationToken ct = default) =>
-                    GroupBySource(await provider.ListTicketsAsync(
-                        ParseEnum<TicketStatus>(status), ParseEnum<TicketPriority>(priority), ct)),
+                async (string? status = null, string? priority = null, string? type = null,
+                       CancellationToken ct = default) =>
+                    GroupByKindAndSource(await provider.ListTicketsAsync(
+                        ParseEnum<TicketStatus>(status), ParseEnum<TicketPriority>(priority), type, ct)),
                 name: "list_tickets",
-                description: "List the user's tickets, optionally filtered by status (Open, InProgress, " +
-                              "Blocked, Resolved, Closed) and/or priority (Low, Medium, High, Urgent). " +
-                              "Use this for questions like 'my open tickets', 'anything urgent?', or " +
-                              "'all my tickets' — omit both filters to list everything. Tickets span every " +
-                              "connected system, so they come back grouped: each group has a 'source' " +
-                              "naming the system its 'tickets' live in. Answer with those same groups — a " +
-                              "heading quoting the group's 'source' word for word, then its tickets with " +
-                              "their project — because some groups are only demo data and the user cannot " +
-                              "tell which from the ticket alone."),
+                description: "List everything the user raised or is assigned — tickets, tasks, and any " +
+                              "other kind of item — optionally filtered by status (Open, InProgress, " +
+                              "Blocked, Resolved, Closed), priority (Low, Medium, High, Urgent) and/or " +
+                              "type ('Task', 'Bug', 'Ticket'…). Use it for 'my open tickets', 'anything " +
+                              "urgent?', 'what are my tasks?' — omit every filter to list the lot. Pass " +
+                              "type only when the user asked about one kind; omitting it returns all kinds. " +
+                              "Results come back in 'groups', one per kind of item per system, each with a " +
+                              "'heading' and its 'items' already written as the lines to show — because a " +
+                              "task is not a ticket and some groups are only demo data, and the user cannot " +
+                              "tell which from an item alone. Follow the 'instructions' in the result " +
+                              "exactly: copy the headings and lines out, and add nothing to them."),
 
             AIFunctionFactory.Create(
                 (CancellationToken ct) => provider.ListProjectsAsync(ct),
                 name: "list_projects",
-                description: "List the projects the user can file tickets in — each has a key (e.g. 'SUP') " +
-                              "and a name (e.g. 'Support'). Use this to find the right project key before " +
-                              "creating a ticket in a particular area, or to answer 'what projects do I have?'. " +
-                              "Backends without a project concept return an empty list."),
+                description: "List the projects the user can file into — each has a key (e.g. 'SUP'), a " +
+                              "name (e.g. 'Support') and 'itemTypes', the kinds of item that project " +
+                              "accepts (e.g. 'Task', 'Bug', 'Story'). Use this to find the right project " +
+                              "key before creating something, to check a project really has the kind the " +
+                              "user asked for, or to answer 'what projects do I have?'. Backends without a " +
+                              "project concept return an empty list."),
 
             AIFunctionFactory.Create(
                 // createAnyway is read by OrchestrationLoop (not used here): the loop blocks a
@@ -160,7 +223,7 @@ public static class TicketTools
                 // relatedTo is filled in by OrchestrationLoop when a near-duplicate is created
                 // anyway, so the two tickets stay linked rather than drifting apart silently.
                 (string title, string? description, TicketPriority priority,
-                 string? project = null, string? assignee = null, string[]? labels = null,
+                 string? project = null, string? type = null, string? assignee = null, string[]? labels = null,
                  bool createAnyway = false, string[]? relatedTo = null, CancellationToken ct = default) =>
                     provider.CreateTicketAsync(
                         new CreateTicketRequest
@@ -168,6 +231,7 @@ public static class TicketTools
                             Title = title,
                             Description = description,
                             Project = project,
+                            Type = type,
                             Priority = priority,
                             Assignee = assignee,
                             Labels = labels ?? [],
@@ -175,22 +239,26 @@ public static class TicketTools
                         },
                         ct),
                 name: CreateTicketToolName,
-                description: "Create a new ticket. Only call this once you have a title, a description, " +
-                              "and a priority — if any is missing, ask the user for it rather than guessing. " +
+                description: "Create a new ticket, task, or whatever kind of item the user asked for. Only " +
+                              "call this once you have a title, a description, and a priority — if any is " +
+                              "missing, ask the user for it rather than guessing. type is the kind to create: " +
+                              "pass 'Task' when they ask for a task or a to-do, 'Bug' for a defect, 'Ticket' " +
+                              "for a plain support ticket — use the wording the user used, and omit it only " +
+                              "when they didn't say. list_projects reports which kinds each project accepts. " +
                               "project is the project key to create it in (e.g. 'SUP'); when the user could " +
                               "have several, call list_projects and use the right one, or omit it to let the " +
-                              "user pick on the confirmation card. assignee and labels are optional. If a " +
-                              "ticket for the same issue already exists for this user, you'll be told and asked " +
+                              "user pick on the confirmation card. assignee and labels are optional. If an " +
+                              "item for the same issue already exists for this user, you'll be told and asked " +
                               "to check with them first; set createAnyway=true only after the user explicitly " +
-                              "chooses to create a separate new ticket. The user approves this in a confirmation " +
+                              "chooses to create a separate new one. The user approves this in a confirmation " +
                               "card before it runs — a returned result means they already approved and the " +
-                              "ticket is fully created."),
+                              "item is fully created."),
 
             AIFunctionFactory.Create(
                 (string ticketId, TicketStatus status, CancellationToken ct) =>
                     provider.UpdateTicketStatusAsync(ticketId, status, ct),
                 name: UpdateStatusToolName,
-                description: "Change an existing ticket's status. The user approves this in a confirmation " +
+                description: "Change an existing ticket's or task's status. The user approves this in a confirmation " +
                               "card before it runs — a returned result means they already approved and the " +
                               "change is fully applied."),
 
@@ -198,7 +266,7 @@ public static class TicketTools
                 (string ticketId, DateTimeOffset? dueAt = null, CancellationToken ct = default) =>
                     provider.SetDueDateAsync(ticketId, dueAt, ct),
                 name: SetDueDateToolName,
-                description: "Set when a ticket is due, as a date (e.g. 2026-08-01). Omit dueAt to clear " +
+                description: "Set when a ticket or task is due, as a date (e.g. 2026-08-01). Omit dueAt to clear " +
                               "the deadline. The user approves this in a confirmation card before it runs — " +
                               "a returned result means they already approved and the date is set."),
 
@@ -206,7 +274,7 @@ public static class TicketTools
                 (string ticketId, string? assignee = null, CancellationToken ct = default) =>
                     provider.AssignTicketAsync(ticketId, assignee, ct),
                 name: AssignTicketToolName,
-                description: "Assign a ticket to someone, or reassign it. Pass an empty assignee to " +
+                description: "Assign a ticket or task to someone, or reassign it. Pass an empty assignee to " +
                               "leave it unassigned. The user approves this in a confirmation card before " +
                               "it runs — a returned result means they already approved and it is applied."),
 
@@ -220,7 +288,7 @@ public static class TicketTools
                     return ticket;
                 },
                 name: ResolveTicketToolName,
-                description: "Resolve a ticket and record why in one step: sets the status to Resolved " +
+                description: "Resolve a ticket or task and record why in one step: sets the status to Resolved " +
                               "and adds the note as a comment. Prefer this over update_ticket_status when " +
                               "the user is closing something out. Ask for a short resolution note if they " +
                               "haven't given one."),
@@ -229,7 +297,7 @@ public static class TicketTools
                 (string ticketId, string body, CancellationToken ct) =>
                     provider.AddCommentAsync(ticketId, body, ct),
                 name: AddCommentToolName,
-                description: "Add a comment to an existing ticket. The user approves this in a confirmation " +
+                description: "Add a comment to an existing ticket or task. The user approves this in a confirmation " +
                               "card before it runs — a returned result means they already approved and the " +
                               "comment is saved.")
         ];

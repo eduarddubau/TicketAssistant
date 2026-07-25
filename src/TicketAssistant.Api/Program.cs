@@ -58,7 +58,11 @@ if (jiraEnabled)
     {
         ProjectKey = builder.Configuration["Tickets:Jira:ProjectKey"] ?? "",
         IssueType = builder.Configuration["Tickets:Jira:IssueType"] ?? "Task",
-        ScopeToReporter = !bool.TryParse(builder.Configuration["Tickets:Jira:ScopeToReporter"], out var s) || s
+        // ScopeToReporter is the old name for this, still honoured so an existing .env keeps working
+        // — it now means "mine" as reporter *or* assignee, which is what people meant by it anyway.
+        ScopeToCurrentUser = !bool.TryParse(
+            builder.Configuration["Tickets:Jira:ScopeToCurrentUser"]
+            ?? builder.Configuration["Tickets:Jira:ScopeToReporter"], out var s) || s
     });
     var atlassian = new AtlassianOAuthOptions
     {
