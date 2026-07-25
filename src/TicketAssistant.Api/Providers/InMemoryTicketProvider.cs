@@ -18,8 +18,9 @@ public sealed class InMemoryTicketProvider : ITicketProvider
     /// <summary>Single synthetic project, mirroring the mock board (ids are PROJ-*).</summary>
     private const string MockProjectKey = "PROJ";
 
-    /// <summary>The kinds of item this stub offers, mirroring the mock board's two.</summary>
-    private static readonly string[] StubItemTypes = [ItemTypes.Ticket, "Task"];
+    /// <summary>The kinds of item this stub offers, mirroring the mock board's menu.</summary>
+    private static readonly string[] StubItemTypes =
+        [ItemTypes.Ticket, "Task", "Bug", "Incident", "Question"];
 
     // A single synthetic project so this backend is a selectable create target (ids are PROJ-*).
     public Task<IReadOnlyList<TicketProject>> ListProjectsAsync(CancellationToken ct = default) =>

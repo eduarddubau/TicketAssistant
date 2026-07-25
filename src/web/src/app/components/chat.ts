@@ -120,10 +120,9 @@ type LogItem =
        shape independently of its content. */
     .bubble-wrap { position: relative; max-width: 86%; min-width: 0; }
 
-    /* Light travelling around the bubble wall: a conic gradient whose angle sweeps, inside a box
-       clipped to the bubble's rounded rectangle and masked to a thin band, so only the border
-       lights up. Every assistant message keeps a calm version of it; the one being generated turns
-       it up. */
+    /* Light travelling around the bubble wall: a conic gradient spinning inside a box clipped to
+       the bubble's rounded rectangle and masked to a thin band, so only the border lights up.
+       Every assistant message keeps a calm version of it; the one being generated turns it up. */
     .ring {
       position: absolute; inset: 0; z-index: 2; pointer-events: none;
       border-radius: 18px; overflow: hidden; padding: 1.5px;
@@ -132,30 +131,35 @@ type LogItem =
       -webkit-mask-composite: xor; mask-composite: exclude;
       opacity: 0.8; transition: opacity 0.5s var(--ease);
     }
-    /* Fills the bubble whatever its shape (see --sweep in styles.css): a long listing is far
-       taller than it is wide, and the light has to travel all the way round it. */
+    /* A square at least 250% of *both* dimensions, so the spin covers the bubble whatever shape it
+       is. Sizing it off the width alone (the obvious width: 250% plus aspect-ratio: 1) works only
+       while a bubble is about as tall as it is wide: a long ticket listing is far taller, and the
+       light stopped part-way down it. min-width/min-height with an aspect ratio resolves to a
+       square of the larger one — 5000px for a 300x2000 bubble. */
     .ring i {
-      position: absolute; inset: 0; --sweep: 0deg;
-      background: conic-gradient(from var(--sweep), #4f8bff, #9b5cff, #ff5ca8, #38e1ff, #4f8bff);
-      animation: glow-sweep 6s linear infinite;   /* idle: clearly alive, just unhurried */
+      position: absolute; top: 50%; left: 50%;
+      width: auto; height: auto; min-width: 250%; min-height: 250%; aspect-ratio: 1;
+      background: conic-gradient(#4f8bff, #9b5cff, #ff5ca8, #38e1ff, #4f8bff);
+      transform: translate(-50%, -50%);
+      animation: glow-spin 6s linear infinite;    /* idle: clearly alive, just unhurried */
     }
     .ring.hot { opacity: 1; }
     .ring.hot i { animation-duration: 2s; }        /* generating: races */
 
 
-    /* Interior counter-sweeping glow — only while generating, so it never sits behind settled
+    /* Interior counter-rotating glow — only while generating, so it never sits behind settled
        text. Clipped to the bubble so it can't bleed outside. */
     .inner {
       position: absolute; inset: 0; z-index: 0; pointer-events: none;
       border-radius: 18px; overflow: hidden; opacity: 0.6;
     }
-    /* Overhangs the bubble so the blur's own fade falls outside the clip, instead of leaving a
-       pale rim inside it. */
     .inner i {
-      position: absolute; inset: -25%; --sweep: 0deg;
-      background: conic-gradient(from var(--sweep), #4f8bff, #9b5cff, #ff5ca8, #38e1ff, #4f8bff);
+      position: absolute; top: 50%; left: 50%;
+      width: auto; height: auto; min-width: 250%; min-height: 250%; aspect-ratio: 1;
+      background: conic-gradient(#4f8bff, #9b5cff, #ff5ca8, #38e1ff, #4f8bff);
       filter: blur(22px);
-      animation: glow-sweep 4s linear infinite reverse;
+      transform: translate(-50%, -50%);
+      animation: glow-spin 4s linear infinite reverse;
     }
 
     .bubble.assistant {

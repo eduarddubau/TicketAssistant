@@ -204,5 +204,22 @@ public sealed class TicketStore
             "Review the new on-call rota",
             "Morgan drafted next quarter's rota and needs a second pair of eyes.",
             "Low", "alice", ["process"], Type: "Task"), owner: "morgan");
+
+        // One of each remaining kind, so filtering to Bugs or Incidents isn't an empty screen on a
+        // board nobody has typed into yet.
+        Create(new CreateTicketBody(
+            "Export to CSV drops the last row",
+            "Exporting 50 rows writes 49. Reproduced on the reports screen with any filter.",
+            "Medium", "alice", ["bug", "reports"], Type: "Bug"), owner: "alice");
+
+        Create(new CreateTicketBody(
+            "Checkout is timing out for everyone",
+            "Payments have been failing since 14:20; the gateway returns 504 on every attempt.",
+            "Urgent", "alice", ["payments"], Type: "Incident"), owner: "alice");
+
+        Create(new CreateTicketBody(
+            "Do we back up the staging database?",
+            "Asking before I run a migration against it tomorrow morning.",
+            "Low", null, ["infra"], Type: "Question"), owner: "alice");
     }
 }

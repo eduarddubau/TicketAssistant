@@ -21,8 +21,14 @@ public sealed class HttpTicketProvider(HttpClient http) : ITicketProvider
     /// <summary>The mock is a single board; it presents itself as one project (its ids are PROJ-*).</summary>
     private const string MockProjectKey = "PROJ";
 
-    /// <summary>The kinds of item the mock board accepts — it takes any string, these are the offered ones.</summary>
-    private static readonly string[] MockItemTypes = [ItemTypes.Ticket, "Task"];
+    /// <summary>
+    /// The kinds of item the mock board offers. It stores whatever string it's given, so this is a
+    /// menu rather than a constraint — chosen to cover what a support desk actually files: something
+    /// reported (Ticket), something to do (Task), something broken (Bug), something breaking right
+    /// now (Incident), and someone asking (Question).
+    /// </summary>
+    private static readonly string[] MockItemTypes =
+        [ItemTypes.Ticket, "Task", "Bug", "Incident", "Question"];
 
     // The mock is one board; expose it as a single project so it's a selectable create target
     // (its ids are PROJ-*). No site URL — mock ticket links come from the board template instead.

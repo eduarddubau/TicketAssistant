@@ -74,7 +74,8 @@
 }
 .new-chat:active { transform: translateY(0); }
 
-app-toolbar { margin-left: auto; min-width: 0; }
+/* Spans what's left of the header, so the toolbar's own two groups can sit at opposite ends. */
+app-toolbar { flex: 1; min-width: 0; margin-left: 0.9rem; }
 
 .connect-banner {
   display: flex;

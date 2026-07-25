@@ -7,16 +7,58 @@ import { DebugService } from '../services/debug.service';
 import { KindsService } from '../services/kinds.service';
 
 /**
- * The config strip: who you are (scopes the mock), which kinds of item you're looking at, which
- * LLM/model to use, GPU vs CPU for Ollama with a live status badge, and — when Jira is enabled — the
- * connect/disconnect control. All of it just tweaks headers or session state; only a change of user
- * needs a fresh conversation, which it signals to the parent.
+ * The header's controls, in two groups. On the left, what you're looking at: which kinds of item,
+ * and who you are (which scopes the mock). On the right, how the machine is set up: provider, model,
+ * GPU vs CPU with a live status badge, the debug console, and — when Jira is enabled — the
+ * connect/disconnect control. The split is the point: the left pair changes the answers you get, the
+ * right group changes the machinery that produces them.
+ *
+ * All of it just tweaks headers or session state; only a change of user needs a fresh conversation,
+ * which it signals to the parent.
  */
 @Component({
   selector: 'app-toolbar',
   standalone: true,
   template: `
     <div class="bar">
+      <div class="grp">
+        <!-- What the assistant is allowed to look at. Nothing ticked = everything; the API enforces
+             the choice on reads, so it holds regardless of what the model decides to do. -->
+        <div class="kinds" [class.open]="kindsOpen()">
+          <button class="ghost k-btn" [class.on]="kinds.active().length" (click)="toggleKinds($event)"
+                  [title]="kinds.active().length ? 'Reads are limited to: ' + kinds.active().join(', ') : 'Reads cover every kind of item'">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor"
+                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M3 5h18M6 12h12M10 19h4"/>
+            </svg>
+            {{ kinds.summary() }}
+          </button>
+
+          @if (kindsOpen()) {
+            <div class="pop" (click)="$event.stopPropagation()">
+              @if (kinds.available().length) {
+                <button class="all" [class.on]="!kinds.active().length" (click)="kinds.clear()">All kinds</button>
+                @for (k of kinds.available(); track k) {
+                  <label class="k-row">
+                    <input type="checkbox" [checked]="kinds.isOn(k)" (change)="kinds.toggle(k)" />
+                    <span class="k-name">{{ k }}</span>
+                  </label>
+                }
+                <p class="hint">Nothing ticked means every kind.</p>
+              } @else {
+                <p class="hint">No kinds yet — connect a backend first.</p>
+              }
+            </div>
+          }
+        </div>
+
+        <div class="ctl">
+          <span class="lbl">User</span>
+          <input class="inp user" [value]="session.userName()" (change)="onUser($any($event.target).value)" />
+        </div>
+      </div>
+
+      <div class="grp right">
       <!-- Provider first, then its model: choosing a provider resets the model to that provider's
            default, so the wider choice belongs upstream of the narrower one. -->
       <div class="ctl">
@@ -55,36 +97,6 @@ import { KindsService } from '../services/kinds.service';
         </span>
       }
 
-      <!-- What the assistant is allowed to look at. Nothing ticked = everything; the API enforces
-           the choice on reads, so it holds regardless of what the model decides to do. -->
-      <div class="kinds" [class.open]="kindsOpen()">
-        <button class="ghost k-btn" [class.on]="kinds.active().length" (click)="toggleKinds($event)"
-                [title]="kinds.active().length ? 'Reads are limited to: ' + kinds.active().join(', ') : 'Reads cover every kind of item'">
-          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor"
-               stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M3 5h18M6 12h12M10 19h4"/>
-          </svg>
-          {{ kinds.summary() }}
-        </button>
-
-        @if (kindsOpen()) {
-          <div class="pop" (click)="$event.stopPropagation()">
-            @if (kinds.available().length) {
-              <button class="all" [class.on]="!kinds.active().length" (click)="kinds.clear()">All kinds</button>
-              @for (k of kinds.available(); track k) {
-                <label class="k-row">
-                  <input type="checkbox" [checked]="kinds.isOn(k)" (change)="kinds.toggle(k)" />
-                  <span class="k-name">{{ k }}</span>
-                </label>
-              }
-              <p class="hint">Nothing ticked means every kind.</p>
-            } @else {
-              <p class="hint">No kinds yet — connect a backend first.</p>
-            }
-          </div>
-        }
-      </div>
-
       <span class="sep"></span>
 
       <!-- Opens the debug console. Also what makes the API stream its trace at all, so it reads
@@ -97,11 +109,6 @@ import { KindsService } from '../services/kinds.service';
         </svg>
         Debug
       </button>
-
-      <div class="ctl">
-        <span class="lbl">User</span>
-        <input class="inp user" [value]="session.userName()" (change)="onUser($any($event.target).value)" />
-      </div>
 
       @if (jiraEnabled) {
         @if (jira.status().connected) {
@@ -120,6 +127,7 @@ import { KindsService } from '../services/kinds.service';
           </button>
         }
       }
+      </div>
     </div>
     @if (error()) { <div class="err">{{ error() }}</div> }
   `,
@@ -129,7 +137,11 @@ import { KindsService } from '../services/kinds.service';
        control line box (1.15rem) + vertical padding (2 x 0.5rem) + border (2 x 1px). Anything with
        an explicit height uses this so it sits level with them. */
     :host { display: block; --pill-h: calc(1.15rem + 1rem + 2px); }
-    .bar { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; justify-content: flex-end; }
+    .bar { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+    /* Two clusters, pushed apart: reading scope on the left, machinery on the right. Each wraps on
+       its own so a narrow window stacks the groups instead of interleaving them. */
+    .grp { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+    .grp.right { margin-left: auto; justify-content: flex-end; }
 
     /* A fixed height plus a shared line-height on every child is what actually lines the tiny
        uppercase label up with the input/select text — flex centring alone leaves them optically
@@ -223,7 +235,8 @@ import { KindsService } from '../services/kinds.service';
     .kinds.open .ghost.k-btn { border-color: var(--border-strong); }
 
     .pop {
-      position: absolute; top: calc(100% + 0.4rem); right: 0; z-index: 30;
+      /* Hangs from the pill's left edge, since the pill now sits at the left end of the header. */
+      position: absolute; top: calc(100% + 0.4rem); left: 0; z-index: 30;
       min-width: 13rem; max-width: 20rem; max-height: 60vh; overflow: auto;
       padding: 0.45rem; border-radius: var(--r); text-align: left;
       background: rgba(14, 16, 24, 0.96); border: 1px solid var(--border-strong);
