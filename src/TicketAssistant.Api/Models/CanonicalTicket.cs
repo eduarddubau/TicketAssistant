@@ -3,7 +3,17 @@ namespace TicketAssistant.Api.Models;
 public sealed class CanonicalTicket
 {
     public required string Id { get; init; }
+
+    /// <summary>Which backend this ticket lives in ("jira", "mock-ticketing", "in-memory").</summary>
     public required string ProviderName { get; init; }
+
+    /// <summary>
+    /// The project this ticket belongs to (its key, e.g. "SUP"). With several backends and Jira
+    /// sites in play, this plus <see cref="ProviderName"/> is what tells a reader — and the
+    /// model — where a ticket actually lives.
+    /// </summary>
+    public string? Project { get; init; }
+
     public required string Title { get; init; }
     public string? Description { get; init; }
     public required TicketStatus Status { get; init; }

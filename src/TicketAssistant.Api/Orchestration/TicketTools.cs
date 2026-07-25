@@ -86,7 +86,8 @@ public static class TicketTools
                 name: "search_tickets",
                 description: "Search tickets by words appearing in their title, description or labels " +
                               "(e.g. 'login', 'printer'). This matches text only — to filter by status " +
-                              "or priority use list_tickets instead."),
+                              "or priority use list_tickets instead. Results span every connected system; " +
+                              "mention each match's project so the user knows where it lives."),
 
             AIFunctionFactory.Create(
                 // status/priority are taken as loose strings and parsed case-insensitively rather
@@ -100,8 +101,10 @@ public static class TicketTools
                 description: "List the user's tickets, optionally filtered by status (Open, InProgress, " +
                               "Blocked, Resolved, Closed) and/or priority (Low, Medium, High, Urgent). " +
                               "Use this for questions like 'my open tickets', 'anything urgent?', or " +
-                              "'all my tickets' — omit both filters to list everything. Results can span " +
-                              "several projects."),
+                              "'all my tickets' — omit both filters to list everything. Results span " +
+                              "every connected system, so each ticket carries a 'project' and a " +
+                              "'providerName': when you list tickets, always say which project each one " +
+                              "belongs to, since the same user can have tickets in several."),
 
             AIFunctionFactory.Create(
                 (CancellationToken ct) => provider.ListProjectsAsync(ct),

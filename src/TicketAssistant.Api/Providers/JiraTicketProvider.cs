@@ -40,7 +40,7 @@ public sealed class JiraTicketProvider(
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
     private const string Fields =
-        "summary,description,status,priority,assignee,reporter,labels,created,updated,duedate,issuelinks";
+        "summary,description,status,priority,assignee,reporter,labels,created,updated,duedate,issuelinks,project";
 
     public string Name => "jira";
 
@@ -77,7 +77,8 @@ public sealed class JiraTicketProvider(
                     continue;
                 projects.AddRange(values.EnumerateArray()
                     .Select(v => new TicketProject(
-                        v.GetProperty("key").GetString() ?? "", v.GetProperty("name").GetString() ?? "", site.Name, site.SiteUrl))
+                        v.GetProperty("key").GetString() ?? "", v.GetProperty("name").GetString() ?? "",
+                        Provider: Name, SiteName: site.Name, SiteUrl: site.SiteUrl))
                     .Where(p => p.Key.Length > 0));
             }
             catch (Exception ex)
@@ -366,6 +367,9 @@ public sealed class JiraTicketProvider(
         {
             Id = key,
             ProviderName = Name,
+            // Prefer the issue's own project field; fall back to the key prefix ("SUP-12" → "SUP").
+            Project = GetNested(f, "project", "key")
+                      ?? (key.LastIndexOf('-') is > 0 and var dash ? key[..dash] : null),
             Title = f.GetProperty("summary").GetString() ?? "",
             Description = f.TryGetProperty("description", out var d) ? TextFromAdf(d) : null,
             Status = MapStatusFromJira(f.GetProperty("status")),
