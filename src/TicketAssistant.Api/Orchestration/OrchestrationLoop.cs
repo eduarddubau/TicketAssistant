@@ -150,6 +150,10 @@ public sealed class OrchestrationLoop(
         // second time, let it through — the confirmation card is the real safety net.
         var nudgedRepeatedCreate = false;
 
+        // A model that answers with nothing gets one nudge, then a graceful apology.
+        const int maxEmptyReplies = 2;
+        var emptyReplies = 0;
+
         for (var turn = 0; ; turn++)
         {
             if (turn >= maxTurns)
@@ -298,6 +302,30 @@ public sealed class OrchestrationLoop(
                     "to perform an action, call the tool properly; otherwise just reply in plain language " +
                     "or ask me for any details you need."));
                 continue;
+            }
+
+            // An empty reply with no tool calls is a dead end — the user sees a blank bubble and
+            // has to prod the assistant ("hello?") to get anything. Small models do this most
+            // often right after a guardrail hands them a tool result to explain. Nudge once for
+            // a real answer; if it still comes back empty, say something rather than nothing.
+            if (calls.Count == 0 && !streamedText && string.IsNullOrWhiteSpace(response.Text))
+            {
+                emptyReplies++;
+                logger.LogWarning("Model returned an empty reply (attempt {Attempt})", emptyReplies);
+
+                if (emptyReplies < maxEmptyReplies)
+                {
+                    messages.Add(new ChatMessage(ChatRole.User,
+                        "Your last reply was empty and nothing was shown to me. Please respond in plain " +
+                        "language now — summarize what you found or did, and ask me for whatever you need " +
+                        "to continue."));
+                    continue;
+                }
+
+                yield return new OrchestrationEvent.AssistantText(
+                    "Sorry — I didn't manage to put that into words. Could you rephrase, or tell me what " +
+                    "you'd like me to do next?");
+                yield break;
             }
 
             messages.AddMessages(response); // remember its reply (text and/or tool calls)
