@@ -22,7 +22,7 @@ function Finish([int]$Code) {
     Write-Host ""
     if ($Code -eq 0) {
         Write-Host "Success - everything is up and ready." -ForegroundColor Green
-        Write-Host "  Chat console  -> http://localhost:5080/"
+        Write-Host "  Console       -> http://localhost:4200/   (the app - start here)"
         Write-Host "  Ticket board  -> http://localhost:5090/"
     }
     else {

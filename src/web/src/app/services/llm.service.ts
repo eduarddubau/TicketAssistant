@@ -4,7 +4,7 @@ import { LlmInfo, OllamaComputeStatus } from '../models';
 import { SessionService } from './session.service';
 
 /**
- * Mirrors the test console's LLM switchers: which provider/model to use and whether to force
+ * Backs the header's LLM switchers: which provider/model to use and whether to force
  * Ollama onto CPU, plus the live GPU/CPU status badge. The choices ride on request headers
  * (X-Llm-Provider / X-Llm-Model / X-Ollama-Compute) that ChatClientFactory reads per request.
  */

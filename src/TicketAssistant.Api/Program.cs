@@ -1,7 +1,7 @@
 // Application entry point. This file has two halves:
 //   1. Service registration (dependency injection) — wire up the LLM client, the ticket
 //      backend, and the orchestration pieces.
-//   2. The HTTP pipeline — middleware and the three chat endpoints.
+//   2. The HTTP pipeline — middleware and the endpoints the console calls.
 // .NET "top-level statements": the code below runs directly, no Main method needed.
 using System.Text.Json;
 using Microsoft.Extensions.AI;
@@ -13,7 +13,8 @@ using TicketAssistant.Api.Providers;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Allow the Angular dev server (future frontend) to call this API from another origin.
+// The Angular console (the front-end, src/web) is served from its own origin, so it needs CORS
+// to call this API. It's the only client — nothing is served from here but the API itself.
 const string AngularDevCorsPolicy = "AngularDev";
 builder.Services.AddCors(options => options.AddPolicy(AngularDevCorsPolicy, policy =>
     policy.WithOrigins("http://localhost:4200").AllowAnyMethod().AllowAnyHeader()));
@@ -116,15 +117,16 @@ var app = builder.Build();
 // ----- HTTP pipeline -----
 app.UseCors(AngularDevCorsPolicy);
 
-// Serves wwwroot/index.html at "/" — a minimal SSE chat client for testing the API
-// in a browser without standing up the Angular app. Same-origin, so no CORS involved.
-app.UseDefaultFiles();
-app.UseStaticFiles();
-
+// No static files here: this service is the API. The front-end is the Angular console in
+// src/web (http://localhost:4200), which calls it cross-origin under the policy above.
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
     app.MapScalarApiReference(); // http://localhost:<port>/scalar/v1
+
+    // Nothing lives at the root anymore, so send anyone poking at this port to the API
+    // reference — the useful thing here. The app itself is the console on :4200.
+    app.MapGet("/", () => Results.Redirect("/scalar/v1"));
 }
 
 // The Jira OAuth popup endpoints only exist when the Jira backend is in the mix.

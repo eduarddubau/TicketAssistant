@@ -23,7 +23,7 @@ finish() {
   echo
   if [ "$status" -eq 0 ]; then
     printf '\033[1;32m✔ Success — everything is up and ready.\033[0m\n'
-    echo "  Chat console  → http://localhost:5080/"
+    echo "  Console       → http://localhost:4200/   (the app — start here)"
     echo "  Ticket board  → http://localhost:5090/"
   else
     printf '\033[1;31m✘ Startup failed (exit %s) — the error is in the output above.\033[0m\n' "$status"
