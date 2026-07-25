@@ -51,10 +51,11 @@ git clone https://github.com/eduarddubau/TicketAssistant.git && cd TicketAssista
 ./up.sh          # Linux / macOS / WSL2   —   .\up.ps1 on Windows PowerShell
 ```
 
-That's it: no API key, no .NET SDK, no Node. The script runs in the foreground through five visible
-stages — GPU check, Ollama image, build, container start, chat-model download — retrying every
-download so a network blip doesn't turn into debugging, and ending with **"✔ Success"** once the
-assistant can actually answer.
+That's it: no API key, no .NET SDK, no Node. The script runs in the foreground through six visible
+stages — GPU check, Ollama image, build, container start, chat-model download, and a final report of
+what Ollama actually ended up running on — retrying every download so a network blip doesn't turn
+into debugging, and ending with **"✔ Success"** once the assistant can actually answer. The model is
+loaded on the GPU and kept loaded, so the *first* message is as fast as the rest.
 
 Then open:
 
@@ -176,6 +177,7 @@ Set via `appsettings.json`, environment variables, or `.env` (copy from `.env.ex
 | `Atlassian:RedirectUri` / `:FrontendOrigin` | OAuth callback URL and the console's origin | `…:5080/api/auth/jira/callback` / `…:4200` |
 | `Tickets:Jira:ProjectKey` | *Optional* default project for new tickets (otherwise chosen per ticket in the UI); also `:IssueType` / `:ScopeToReporter` | — |
 | `OLLAMA_GPU_DEVICE` (`.env`, compose only) | Device handed to the Ollama container; the up scripts set it automatically | empty = CPU |
+| `OLLAMA_KEEP_ALIVE` (`.env`, compose only) | How long a model stays loaded when idle; `-1` never unloads it, so no message ever pays the ~1 min reload | `-1` |
 
 Only Ollama runs with no API key. `qwen2.5:7b` is a heavier local alternative with stronger
 multi-step tool calling. Everything here is a default — the console's switchers override the
@@ -258,6 +260,10 @@ scripts handle everything:
   podman machine VM* (the Windows NVIDIA driver you already have is enough host-side — WSL2 projects
   it into the VM). Saying no, or running non-interactively, just means CPU.
 - **No NVIDIA GPU?** CPU, silently.
+- **Already running on the CPU from an earlier start?** `compose up -d` reuses an existing container
+  as-is, devices and all, so a freshly set-up GPU would otherwise never reach Ollama. The scripts
+  compare the existing container against what's being asked for (GPU attached or not, and the
+  keep-alive setting) and re-create it when the two differ.
 
 The attach decision happens at container-creation time — podman refuses to create a container whose
 GPU device isn't available, so it can't be "tried" per request; that's why the scripts detect up

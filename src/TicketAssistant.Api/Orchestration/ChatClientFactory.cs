@@ -94,6 +94,16 @@ public sealed class ChatClientFactory(IConfiguration configuration, IHttpContext
         // like tool-call thought signatures are its problem rather than ours.
         "google" => new Google.GenAI.Client(apiKey: RequireKey("Google:ApiKey")).AsIChatClient(model),
 
-        _ => new OllamaApiClient(new Uri(configuration["Ollama:BaseUrl"] ?? "http://localhost:11434"), model)
+        // Local models answer at their own pace: a long reply, or a turn that loads the model
+        // first, easily runs past HttpClient's 100-second default, which would abort the stream
+        // mid-answer. Nothing here should impose a deadline — the request's own cancellation
+        // token (the browser hanging up) is what ends a call.
+        _ => new OllamaApiClient(
+            new HttpClient
+            {
+                BaseAddress = new Uri(configuration["Ollama:BaseUrl"] ?? "http://localhost:11434"),
+                Timeout = Timeout.InfiniteTimeSpan
+            },
+            model)
     };
 }

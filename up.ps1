@@ -57,6 +57,46 @@ function Invoke-Retry {
     Finish 1
 }
 
+# Reads a variable out of .env. Compose reads that file itself, but this script has to know
+# what was asked for to check the running container against it.
+function Get-DotEnv([string]$Name) {
+    $file = Join-Path $PSScriptRoot ".env"
+    if (-not (Test-Path $file)) { return "" }
+    $line = Select-String -Path $file -Pattern "^$Name=(.*)$" | Select-Object -First 1
+    if (-not $line) { return "" }
+    return $line.Matches[0].Groups[1].Value.Trim().Trim('"', "'")
+}
+
+function Get-OllamaContainer {
+    $name = podman ps -a --format '{{.Names}}' | Select-String '[-_]ollama[-_]1$' | Select-Object -First 1
+    if ($name) { return $name.ToString() }
+    return ""
+}
+
+# podman-compose never re-creates an existing container: `up -d` just starts what's already
+# there, devices and environment included. So an ollama container built before the GPU was
+# set up would quietly stay on the CPU — and keep whatever idle-unload timer it was created
+# with — however carefully this script detects a GPU. Compare what the existing container
+# has against what's being asked for, so step 4 can re-create it when they differ.
+function Test-OllamaStale {
+    $name = Get-OllamaContainer
+    if (-not $name) { return $false }   # nothing there yet — compose will create it with today's settings
+
+    # CDI expands nvidia.com/gpu=all into the individual /dev/nvidia* nodes, so the device list
+    # is compared as "has NVIDIA nodes or not" rather than against the request verbatim.
+    $devices = podman inspect $name --format '{{range .HostConfig.Devices}}{{.PathOnHost}} {{end}}' 2>$null
+    $hasGpu = "$devices" -match "nvidia"
+    $wantGpu = $env:OLLAMA_GPU_DEVICE -and $env:OLLAMA_GPU_DEVICE -ne "/dev/null"
+
+    $keepAlive = (podman inspect $name --format '{{range .Config.Env}}{{println .}}{{end}}' 2>$null |
+        Select-String '^OLLAMA_KEEP_ALIVE=(.*)$' | Select-Object -First 1)
+    $keepAlive = if ($keepAlive) { $keepAlive.Matches[0].Groups[1].Value } else { "" }
+    $wantKeepAlive = if ($env:OLLAMA_KEEP_ALIVE) { $env:OLLAMA_KEEP_ALIVE } else { Get-DotEnv "OLLAMA_KEEP_ALIVE" }
+    if (-not $wantKeepAlive) { $wantKeepAlive = "-1" }
+
+    return ($hasGpu -ne $wantGpu) -or ($keepAlive -ne $wantKeepAlive)
+}
+
 function Get-MachineCdiEntries {
     $entries = podman machine ssh "ls /etc/cdi 2>/dev/null" 2>$null
     if ($LASTEXITCODE -ne 0 -and (Test-Path "/etc/cdi")) {
@@ -93,13 +133,13 @@ function Install-MachineGpuSupport {
     return ((Get-MachineCdiEntries) -match "nvidia")
 }
 
-Step "1/5 Checking for an NVIDIA GPU"
-$envFile = Join-Path $PSScriptRoot ".env"
-$setInDotEnv = (Test-Path $envFile) -and
-    (Select-String -Path $envFile -Pattern '^OLLAMA_GPU_DEVICE=.+' -Quiet)
+Step "1/6 Checking for an NVIDIA GPU"
+# An explicit setting always wins; the .env one is pulled into the environment so the rest
+# of the script knows which device the containers are getting.
+if (-not $env:OLLAMA_GPU_DEVICE) { $env:OLLAMA_GPU_DEVICE = Get-DotEnv "OLLAMA_GPU_DEVICE" }
 
-if ($env:OLLAMA_GPU_DEVICE -or $setInDotEnv) {
-    Write-Host "OLLAMA_GPU_DEVICE is set explicitly - using it as-is."
+if ($env:OLLAMA_GPU_DEVICE) {
+    Write-Host "OLLAMA_GPU_DEVICE is set explicitly ($env:OLLAMA_GPU_DEVICE) - using it as-is."
 }
 elseif ((Get-MachineCdiEntries) -match "nvidia") {
     $env:OLLAMA_GPU_DEVICE = "nvidia.com/gpu=all"
@@ -123,30 +163,54 @@ else {
     }
 }
 
-Step "2/5 Downloading the Ollama runtime image (cached after the first run)"
+Step "2/6 Downloading the Ollama runtime image (cached after the first run)"
 Invoke-Retry -Attempts 3 -TimeoutSec 1200 -Command @("podman", "pull", "docker.io/ollama/ollama:latest")
 
-Step "3/5 Building the assistant and the mock ticketing system"
+Step "3/6 Building the assistant and the mock ticketing system"
 Invoke-Retry -Attempts 3 -TimeoutSec 1200 -Command @("podman", "compose", "build")
 
-Step "4/5 Starting the containers"
+Step "4/6 Starting the containers"
+# --force-recreate covers the whole stack (podman-compose doesn't honour a per-service filter
+# here), which is fine: everything is stateless — Ollama's models live in a volume, and the
+# model itself is re-loaded by the warm-up in step 5.
+$upArgs = @()
+if (Test-OllamaStale) {
+    Write-Host "The existing Ollama container has different GPU/keep-alive settings - re-creating it."
+    $upArgs += "--force-recreate"
+}
+if ($ComposeArgs) { $upArgs += $ComposeArgs }
 # podman-compose occasionally trips over recreating an exited one-shot container
 # ("no container ... found", exit 125); a single retry settles it.
-podman compose up -d @ComposeArgs
+podman compose up -d @upArgs
 if ($LASTEXITCODE -ne 0) {
     Write-Host "compose up hit a transient error - retrying once..."
     Start-Sleep -Seconds 2
-    podman compose up -d @ComposeArgs
+    podman compose up -d @upArgs
     if ($LASTEXITCODE -ne 0) { Finish $LASTEXITCODE }
 }
 
-Step "5/5 Downloading the chat model (a couple of GB on first run, instant after)"
+Step "5/6 Downloading the chat model (a couple of GB on first run, instant after)"
 $puller = (podman ps -a --format '{{.Names}}' | Select-String "ollama-pull" | Select-Object -First 1).ToString()
 podman logs -f $puller 2>&1
 $rc = podman inspect --format '{{.State.ExitCode}}' $puller
 if ($rc -ne "0") {
     Write-Error "Model download failed (exit $rc) - see above. Re-run .\up.ps1 to retry."
     Finish 1
+}
+
+Step "6/6 Checking what Ollama ended up running"
+# What actually happened, rather than what was asked for: PROCESSOR says GPU or CPU, and
+# UNTIL "Forever" confirms the model stays loaded instead of being unloaded when idle.
+$ollama = Get-OllamaContainer
+if ($ollama) {
+    $ps = podman exec $ollama ollama ps 2>&1
+    $ps | Write-Host
+    if ("$ps" -match "GPU") {
+        Write-Host "The model is loaded on the GPU and stays loaded - the first message is instant."
+    }
+    else {
+        Write-Host "The model is loaded on the CPU (replies will be slower). See README ""GPU acceleration""."
+    }
 }
 
 Finish 0

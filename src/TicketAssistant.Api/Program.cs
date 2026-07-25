@@ -238,7 +238,8 @@ app.MapGet("/api/llm/ollama/status", async (IConfiguration config, CancellationT
         var loaded = ps.GetProperty("models").EnumerateArray().FirstOrDefault();
         if (loaded.ValueKind != JsonValueKind.Object)
         {
-            // Nothing in memory — Ollama unloads idle models after a few minutes.
+            // Nothing in memory — the model hasn't been loaded yet (compose sets
+            // OLLAMA_KEEP_ALIVE=-1, so once loaded it stays until the container restarts).
             return Results.Ok(new { loaded = false, model = (string?)null, processor = (string?)null, gpuAttached, hostHasGpu });
         }
 

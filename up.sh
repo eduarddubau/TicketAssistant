@@ -63,6 +63,34 @@ retry() { # retry <attempts> <timeout-seconds> <cmd...>
 # checking nvidia*.{yaml,json} would report "no spec" when only nvidia.yaml exists.
 has_cdi_spec() { ls /etc/cdi/nvidia* >/dev/null 2>&1; }
 
+# Reads a variable out of .env. Compose reads that file itself, but this script has to know
+# what was asked for to check the running container against it.
+dotenv() { sed -n "s/^$1=//p" .env 2>/dev/null | head -1 | tr -d "\"'\r" | sed 's/^ *//; s/ *$//'; }
+
+ollama_container() { podman ps -a --format '{{.Names}}' | grep -m1 -E '[-_]ollama[-_]1$' || true; }
+
+# podman-compose never re-creates an existing container: `up -d` just starts what's already
+# there, devices and environment included. So an ollama container built before the GPU was
+# set up would quietly stay on the CPU — and keep whatever idle-unload timer it was created
+# with — however carefully this script detects a GPU. Compare what the existing container
+# has against what's being asked for, so step 4 can re-create it when they differ.
+ollama_stale() {
+  local name devices keepalive want_keepalive has_gpu=no want_gpu=no
+  name=$(ollama_container)
+  [ -n "$name" ] || return 1   # nothing there yet — compose will create it with today's settings
+  devices=$(podman inspect "$name" --format '{{range .HostConfig.Devices}}{{.PathOnHost}} {{end}}' 2>/dev/null || true)
+  keepalive=$(podman inspect "$name" --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null \
+    | sed -n 's/^OLLAMA_KEEP_ALIVE=//p' | head -1)
+
+  # CDI expands nvidia.com/gpu=all into the individual /dev/nvidia* nodes, so the device list
+  # is compared as "has NVIDIA nodes or not" rather than against the request verbatim.
+  case "$devices" in *nvidia*) has_gpu=yes ;; esac
+  case "${OLLAMA_GPU_DEVICE:-}" in ""|/dev/null) ;; *) want_gpu=yes ;; esac
+
+  want_keepalive=${OLLAMA_KEEP_ALIVE:-$(dotenv OLLAMA_KEEP_ALIVE)}
+  [ "$has_gpu" != "$want_gpu" ] || [ "$keepalive" != "${want_keepalive:--1}" ]
+}
+
 # One-time host setup for GPU containers (Fedora/RHEL). Called only after the user says
 # yes — it adds NVIDIA's repo and installs packages via sudo, which should be an explicit
 # choice. Idempotent: each part checks before changing anything. Returns 0 when the CDI
@@ -100,9 +128,14 @@ setup_gpu() {
   has_cdi_spec
 }
 
-step "1/5 Checking for an NVIDIA GPU"
-if [ -n "${OLLAMA_GPU_DEVICE:-}" ] || grep -qs '^OLLAMA_GPU_DEVICE=.\+' .env 2>/dev/null; then
-  echo "OLLAMA_GPU_DEVICE is set explicitly — using it as-is."
+step "1/6 Checking for an NVIDIA GPU"
+# An explicit setting always wins; the .env one is pulled into the environment so the rest
+# of the script knows which device the containers are getting.
+if [ -z "${OLLAMA_GPU_DEVICE:-}" ]; then
+  export OLLAMA_GPU_DEVICE=$(dotenv OLLAMA_GPU_DEVICE)
+fi
+if [ -n "${OLLAMA_GPU_DEVICE:-}" ]; then
+  echo "OLLAMA_GPU_DEVICE is set explicitly ($OLLAMA_GPU_DEVICE) — using it as-is."
 elif has_cdi_spec; then
   export OLLAMA_GPU_DEVICE=nvidia.com/gpu=all
   echo "NVIDIA CDI spec found — the GPU will be attached to Ollama."
@@ -123,27 +156,51 @@ else
   echo "No NVIDIA GPU found — Ollama will run on the CPU."
 fi
 
-step "2/5 Downloading the Ollama runtime image (cached after the first run)"
+step "2/6 Downloading the Ollama runtime image (cached after the first run)"
 retry 3 1200 podman pull docker.io/ollama/ollama:latest
 
-step "3/5 Building the assistant and the mock ticketing system"
+step "3/6 Building the assistant and the mock ticketing system"
 retry 3 1200 podman compose build
 
-step "4/5 Starting the containers"
+step "4/6 Starting the containers"
 # podman-compose occasionally trips over recreating an exited one-shot container
 # ("no container ... found", exit 125); a single retry settles it.
-if ! podman compose up -d "$@"; then
-  echo "compose up hit a transient error — retrying once..."
-  sleep 2
-  podman compose up -d "$@"
+compose_up() {
+  if ! podman compose up -d "$@"; then
+    echo "compose up hit a transient error — retrying once..."
+    sleep 2
+    podman compose up -d "$@"
+  fi
+}
+# --force-recreate covers the whole stack (podman-compose doesn't honour a per-service
+# filter here), which is fine: everything is stateless — Ollama's models live in a volume,
+# and the model itself is re-loaded by the warm-up in step 5.
+if ollama_stale; then
+  echo "The existing Ollama container has different GPU/keep-alive settings — re-creating it."
+  compose_up --force-recreate "$@"
+else
+  compose_up "$@"
 fi
 
-step "5/5 Downloading the chat model (a couple of GB on first run, instant after)"
+step "5/6 Downloading the chat model (a couple of GB on first run, instant after)"
 puller=$(podman ps -a --format '{{.Names}}' | grep ollama-pull | head -1)
 podman logs -f "$puller" 2>&1 || true
 rc=$(podman inspect --format '{{.State.ExitCode}}' "$puller")
 if [ "$rc" != "0" ]; then
   echo "Model download failed (exit $rc) — see above. Re-run ./up.sh to retry." >&2
   exit 1
+fi
+
+step "6/6 Checking what Ollama ended up running"
+# What actually happened, rather than what was asked for: PROCESSOR says GPU or CPU, and
+# UNTIL "Forever" confirms the model stays loaded instead of being unloaded when idle.
+ollama=$(ollama_container)
+if [ -n "$ollama" ]; then
+  loaded=$(podman exec "$ollama" ollama ps 2>&1 || true)
+  printf '%s\n' "$loaded"
+  case "$loaded" in
+    *GPU*) echo "The model is loaded on the GPU and stays loaded — the first message is instant." ;;
+    *)     echo "The model is loaded on the CPU (replies will be slower). See README \"GPU acceleration\"." ;;
+  esac
 fi
 # Success/fail banner + keep-window-open prompt are printed by finish() (EXIT trap).
