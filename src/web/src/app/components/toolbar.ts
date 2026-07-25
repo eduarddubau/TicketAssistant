@@ -79,7 +79,11 @@ import { ProjectsService } from '../services/projects.service';
     @if (error()) { <div class="err">{{ error() }}</div> }
   `,
   styles: [`
-    :host { display: block; }
+    /* One height for every pill in the bar. The .ctl pills can't take it directly — they're sized
+       by padding on purpose (see below) — so it mirrors what their padding adds up to:
+       control line box (1.15rem) + vertical padding (2 x 0.5rem) + border (2 x 1px). Anything with
+       an explicit height uses this so it sits level with them. */
+    :host { display: block; --pill-h: calc(1.15rem + 1rem + 2px); }
     .bar { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; justify-content: flex-end; }
 
     /* A fixed height plus a shared line-height on every child is what actually lines the tiny
@@ -130,7 +134,7 @@ import { ProjectsService } from '../services/projects.service';
     .badge {
       display: flex; align-items: center; gap: 0.4rem;
       font-size: 0.68rem; font-weight: 700; letter-spacing: 0.02em; line-height: 1;
-      height: 34px; padding: 0 0.7rem; border-radius: var(--r-full);
+      height: var(--pill-h); padding: 0 0.7rem; border-radius: var(--r-full);
       background: var(--surface); border: 1px solid var(--border); color: var(--text-dim);
     }
     .badge.gpu { background: rgba(52, 211, 153, 0.12); border-color: rgba(52, 211, 153, 0.35); color: #7ff0c4; }
@@ -140,7 +144,7 @@ import { ProjectsService } from '../services/projects.service';
 
     .cta {
       display: flex; align-items: center; gap: 0.45rem;
-      height: 34px; padding: 0 0.95rem; border: 0; border-radius: var(--r-full);
+      height: var(--pill-h); padding: 0 0.95rem; border: 0; border-radius: var(--r-full);
       color: #fff; font-weight: 600; font-size: 0.8rem; line-height: 1;
       background: var(--grad); box-shadow: var(--glow);
       transition: transform 0.15s var(--ease), box-shadow 0.2s var(--ease), filter 0.2s;
@@ -150,7 +154,7 @@ import { ProjectsService } from '../services/projects.service';
     .cta:disabled { opacity: 0.65; cursor: default; }
 
     .ghost {
-      display: flex; align-items: center; height: 34px; padding: 0 0.85rem;
+      display: flex; align-items: center; height: var(--pill-h); padding: 0 0.85rem;
       border-radius: var(--r-full); background: var(--surface); border: 1px solid var(--border);
       color: var(--text-dim); font-size: 0.78rem; line-height: 1; transition: 0.15s var(--ease);
     }
@@ -159,7 +163,7 @@ import { ProjectsService } from '../services/projects.service';
     .jira-pill {
       display: flex; align-items: center; gap: 0.4rem;
       font-size: 0.75rem; color: #cfeadd; line-height: 1;
-      height: 34px; padding: 0 0.75rem; border-radius: var(--r-full);
+      height: var(--pill-h); padding: 0 0.75rem; border-radius: var(--r-full);
       background: rgba(52, 211, 153, 0.1); border: 1px solid rgba(52, 211, 153, 0.28);
     }
     .jira-pill .on { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 8px var(--ok); }
