@@ -111,13 +111,16 @@ builder.Services.AddSingleton<ChatClientFactory>();
 // takes the chat client + tools + provider) and the conversation memory. All singletons:
 // one shared instance for the app's lifetime.
 builder.Services.AddSingleton<UndoStore>();
-// Which kinds of item this request may list, from the console's kind toggles (X-Item-Types).
+// What this request may list, from the console's two filters: which kinds of item
+// (X-Item-Types) and which backends (X-Sources).
 builder.Services.AddSingleton<ItemTypeScope>();
+builder.Services.AddSingleton<SourceScope>();
 builder.Services.AddSingleton(sp =>
     TicketTools.Build(
         sp.GetRequiredService<ITicketProvider>(),
         sp.GetRequiredService<UndoStore>(),
-        sp.GetRequiredService<ItemTypeScope>()));
+        sp.GetRequiredService<ItemTypeScope>(),
+        sp.GetRequiredService<SourceScope>()));
 builder.Services.AddSingleton<OrchestrationLoop>();
 builder.Services.AddSingleton<ConversationStore>();
 
@@ -189,16 +192,18 @@ app.MapGet("/api/system-prompt", (DebugTrace debug) => debug.Enabled
     ? Results.Ok(new { systemPrompt = ConversationStore.SystemPrompt })
     : Results.NotFound());
 
-// Which LLM providers exist, which one this request would use, and which are actually
-// usable (Ollama always; hosted providers only when their API key is configured) — the
-// console uses `configured` to blank out the model dropdown for keyless providers.
-// Callers override per request with the X-Llm-Provider / X-Llm-Model headers.
+// Which LLM providers exist, which models each is configured with, which one this request would
+// use, and which providers are actually usable (Ollama always; hosted providers only when their API
+// key is configured) — the console uses `configured` to blank out the model dropdown for keyless
+// providers, and `models` to fill it. Callers override per request with the X-Llm-Provider /
+// X-Llm-Model headers.
 app.MapGet("/api/llm", (ChatClientFactory chatClients, IConfiguration config) =>
 {
     var (provider, model) = chatClients.Current();
     return Results.Ok(new
     {
         providers = ChatClientFactory.KnownProviders,
+        models = ChatClientFactory.KnownProviders.ToDictionary(p => p, chatClients.ModelsFor),
         defaultModels = ChatClientFactory.KnownProviders.ToDictionary(p => p, chatClients.DefaultModelFor),
         configured = ChatClientFactory.KnownProviders.ToDictionary(
             p => p,

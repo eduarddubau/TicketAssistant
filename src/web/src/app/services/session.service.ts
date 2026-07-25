@@ -8,12 +8,23 @@ import { API_BASE } from '../config';
  */
 @Injectable({ providedIn: 'root' })
 export class SessionService {
-  readonly userName = signal(localStorage.getItem('ta-user') || 'alice');
+  /**
+   * The people this demo has, plus nobody. A fixed list rather than a free-text box: the name only
+   * means anything to the mock board, which has seeded work for exactly these two, so typing
+   * anything else produced an empty screen with no hint as to why.
+   *
+   * The empty entry is that empty screen made deliberate — the API records it as "guest", who owns
+   * none of the mock's tickets, so reads fall through to whatever real account is connected. It's
+   * how you see Jira on its own without turning the mock backend off.
+   */
+  static readonly USERS = ['alice', 'bob', ''] as const;
+
+  readonly userName = signal(known(localStorage.getItem('ta-user')));
   readonly sessionId = signal<string | null>(null);
 
-  /** Mint (or re-mint) a session for the current — or a new — user name. */
+  /** Mint (or re-mint) a session for the current — or a new — user. */
   async ensure(name?: string): Promise<void> {
-    const userName = (name ?? this.userName()).trim() || 'alice';
+    const userName = known(name ?? this.userName());
     this.userName.set(userName);
     localStorage.setItem('ta-user', userName);
 
@@ -25,9 +36,17 @@ export class SessionService {
     this.sessionId.set((await res.json()).sessionId);
   }
 
+  readonly users = SessionService.USERS;
+
   /** The Authorization header for this session, or empty when none has been minted yet. */
   authHeader(): Record<string, string> {
     const id = this.sessionId();
     return id ? { Authorization: `Bearer ${id}` } : {};
   }
+}
+
+/** Falls back to the first user for anything unrecognised — including a name left over in storage. */
+function known(name: string | null | undefined): string {
+  const trimmed = (name ?? '').trim().toLowerCase();
+  return (SessionService.USERS as readonly string[]).includes(trimmed) ? trimmed : SessionService.USERS[0];
 }

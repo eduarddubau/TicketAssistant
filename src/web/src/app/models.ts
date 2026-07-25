@@ -84,6 +84,7 @@ export function providerLabel(provider: string): string {
 
 export interface LlmInfo {
   providers: string[];
+  models: Record<string, string[]>;      // the models each provider is configured with
   defaultModels: Record<string, string>;
   configured: Record<string, boolean>;
   provider: string;

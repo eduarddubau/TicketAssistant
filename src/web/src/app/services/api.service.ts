@@ -5,6 +5,7 @@ import { SessionService } from './session.service';
 import { LlmService } from './llm.service';
 import { DebugService } from './debug.service';
 import { KindsService } from './kinds.service';
+import { SourcesService } from './sources.service';
 
 /**
  * The chat API. Reads are plain JSON; the message/confirm calls return Server-Sent Events, which
@@ -21,6 +22,7 @@ export class ApiService {
   private readonly llm = inject(LlmService);
   private readonly debug = inject(DebugService);
   private readonly kinds = inject(KindsService);
+  private readonly sources = inject(SourcesService);
 
   async createConversation(): Promise<ConversationInfo> {
     const res = await fetch(`${API_BASE}/api/conversations`, {
@@ -69,6 +71,7 @@ export class ApiService {
       ...this.session.authHeader(),
       ...this.llm.headers(),
       ...this.kinds.headers(),
+      ...this.sources.headers(),
       ...this.debug.headers(),
     };
     const startedAt = performance.now();

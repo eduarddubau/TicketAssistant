@@ -20,7 +20,6 @@ export class LlmService {
   private readonly debug = inject(DebugService);
 
   readonly info = signal<LlmInfo | null>(null);
-  readonly ollamaModels = signal<string[]>([]);
   readonly computeStatus = signal<OllamaComputeStatus | null>(null);
 
   readonly provider = signal(localStorage.getItem('ta-provider') || '');
@@ -53,15 +52,16 @@ export class LlmService {
         { provider: this.provider(), model: this.model(), apiDefault: { provider: info.provider, model: info.model }, providersWithCredentials: withKeys },
       );
     } catch { /* leave dropdowns empty if the API isn't up yet */ }
-    await this.loadOllamaModels();
     await this.refreshComputeStatus();
   }
 
-  async loadOllamaModels(): Promise<void> {
-    try {
-      const res = await fetch(`${API_BASE}/api/llm/ollama/models`);
-      this.ollamaModels.set(await res.json());
-    } catch { this.ollamaModels.set([]); }
+  /**
+   * The models the current provider is configured with — the picker's options. Configuration rather
+   * than "everything the provider could serve": for Ollama these are the ones the stack downloaded,
+   * so picking one can't leave the assistant waiting on a model that isn't there.
+   */
+  modelsFor(provider = this.provider()): string[] {
+    return this.info()?.models?.[provider] ?? [];
   }
 
   async refreshComputeStatus(): Promise<void> {
@@ -73,6 +73,7 @@ export class LlmService {
 
   setProvider(p: string): void {
     const was = this.provider();
+    // Whatever the new provider's list starts with; setModel below applies it.
     this.provider.set(p);
     localStorage.setItem('ta-provider', p);
     const hosted = p !== 'Ollama';

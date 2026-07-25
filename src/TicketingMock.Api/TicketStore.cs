@@ -221,5 +221,17 @@ public sealed class TicketStore
             "Do we back up the staging database?",
             "Asking before I run a migration against it tomorrow morning.",
             "Low", null, ["infra"], Type: "Question"), owner: "alice");
+
+        // Bob's own corner of the board: switching user in the console should change the answers,
+        // not empty the screen. The second is alice's, assigned to him — the cross-user case.
+        Create(new CreateTicketBody(
+            "VPN drops every few minutes from the branch office",
+            "Started after Tuesday's firewall change; affects everyone on the 10.4.x network.",
+            "High", "bob", ["network"], Type: "Incident"), owner: "bob");
+
+        Create(new CreateTicketBody(
+            "Draft the Q3 support summary",
+            "Numbers are in the dashboard; alice needs the write-up before the board meeting.",
+            "Medium", "bob", ["reporting"], Type: "Task"), owner: "alice");
     }
 }

@@ -61,14 +61,27 @@ public sealed class ChatClientFactory(IConfiguration configuration, IHttpContext
     };
 
     /// <summary>
+    /// Every model configured for a provider, in configuration order — the console's model picker.
+    /// Deliberately what the config says rather than what a provider reports it can serve: for
+    /// Ollama those are the models the stack actually downloaded on startup, and for a hosted
+    /// provider its catalogue is long, changes without notice, and mostly isn't wired up here.
+    /// </summary>
+    public IReadOnlyList<string> ModelsFor(string provider) => provider.ToLowerInvariant() switch
+    {
+        "ollama" => OllamaModels(),
+        _ => [DefaultModelFor(provider)]
+    };
+
+    /// <summary>
     /// Ollama uses one shared, space-separated model list (Ollama:Models) for both "what to
     /// download on startup" and "which is the default" — the first entry is the default, the
     /// rest exist for the console's dropdown. Falls back to the older single-model key.
     /// </summary>
-    private string DefaultOllamaModel() =>
-        configuration["Ollama:Models"]?.Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault()
-        ?? configuration["Ollama:Model"]
-        ?? "qwen2.5:3b";
+    private string DefaultOllamaModel() => OllamaModels().FirstOrDefault() ?? "qwen2.5:3b";
+
+    private IReadOnlyList<string> OllamaModels() =>
+        (configuration["Ollama:Models"] ?? configuration["Ollama:Model"] ?? "qwen2.5:3b")
+        .Split([' ', ','], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
     /// <summary>The chat client for this request, created once per provider+model combination.</summary>
     public IChatClient Resolve()

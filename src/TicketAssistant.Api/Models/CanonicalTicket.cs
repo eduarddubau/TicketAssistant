@@ -14,7 +14,13 @@ public sealed class CanonicalTicket
     /// phrasing a tool hands it far more reliably than it follows an instruction to translate
     /// "mock-ticketing" itself. Unknown backends fall back to their raw name rather than lying.
     /// </summary>
-    public string Source => ProviderName switch
+    public string Source => SourceFor(ProviderName);
+
+    /// <summary>
+    /// A backend's name in the words the answer should use. Static as well as per-ticket, because
+    /// the source filter has to describe backends it is *excluding*, where there's no ticket to ask.
+    /// </summary>
+    public static string SourceFor(string providerName) => providerName switch
     {
         "jira" => "Jira",
         "mock-ticketing" => "the mock board (demo data, not real work)",

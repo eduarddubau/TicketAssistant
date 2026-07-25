@@ -169,12 +169,16 @@ Every switcher in the header takes effect on the next message — no restart:
 
 | Control | What it does |
 | --- | --- |
-| **Model** | Which model answers. A text field, with a dropdown of the models actually installed in Ollama. |
+| **Model** | Which model answers — the models the chosen provider is *configured* with, so you can't pick one that was never downloaded. |
 | **Provider** | Ollama / Anthropic / OpenAI / Google. A provider with no API key configured is visibly disabled. |
 | **Compute** | Ollama only: *GPU* (used when the container has one) or *CPU* (forced). |
-| **Kinds** | Which kinds of item reads cover — tick any combination of the types your projects actually offer, or none for all of them. Enforced by the API, not asked of the model, so it holds whatever the model decides to do. |
+| **Sources** | Which systems reads cover — Jira, the mock board, the in-memory stub. Tick none for all of them. |
+| **Kinds** | Which kinds of item reads cover — tick any combination of the types your projects actually offer, or none for all of them. |
+
+Both filters are enforced by the API rather than asked of the model, so they hold whatever the model decides to do — and a filtered read tells the model a filter is on, so it says so instead of reporting an empty backlog.
+
 | *status badge* | Where the loaded model is **actually** running, straight from Ollama's own report: `GPU`, `CPU`, a split when the model doesn't fully fit in VRAM, or idle — and `GPU off` when the machine has an NVIDIA GPU the container isn't using. |
-| **User** | Who you are; the mock scopes tickets to this user. Defaults to `alice`, who owns the seed tickets — change it to test isolation. |
+| **User** | Who you are on the mock board: `alice` and `bob` each own seeded work, and `nobody` owns none — pick that to see your connected accounts (Jira) on their own. |
 | **Debug** | Opens the debug console (below). Also `Ctrl` + `` ` ``. |
 | **Connect Jira** | Logs *you* into *your own* Jira through an OAuth popup (shown only when the Jira backend is enabled). |
 

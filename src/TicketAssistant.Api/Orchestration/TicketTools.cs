@@ -97,22 +97,33 @@ public static class TicketTools
     /// returns the whole ticket. Ordered by heading so repeated questions come back the same way.
     /// </summary>
     private static GroupedTickets GroupByKindAndSource(
-        IEnumerable<CanonicalTicket> tickets, ItemTypeScope scope) =>
+        IEnumerable<CanonicalTicket> tickets, ItemTypeScope kinds, SourceScope sources) =>
         new(GroupedTicketsInstructions,
-            // Spelled out for the model, not enforced by it (ItemTypeScope has already dropped the
-            // rest): without this note a filtered read reads exactly like an empty backlog, and the
-            // assistant would cheerfully report that the user has no tickets at all.
-            Filter: scope.Active
-                ? $"The user has filtered the console to {scope.Description}. Other kinds of item " +
-                  "exist but were not returned — mention the filter rather than saying they have none."
-                : null,
-            Groups: tickets.Where(t => scope.Allows(t.Type))
+            Filter: FilterNote(kinds, sources),
+            Groups: tickets.Where(t => kinds.Allows(t.Type) && sources.Allows(t.ProviderName))
                    .GroupBy(t => (t.TypePlural, t.Source))
                    .Select(g => new TicketGroup(
                        Heading: $"{g.Key.TypePlural} in {g.Key.Source}",
                        Items: g.Select(Line).ToList()))
                    .OrderBy(g => g.Heading, StringComparer.Ordinal)
                    .ToList());
+
+    /// <summary>
+    /// What the model is told about the user's filters — spelled out because the scopes have already
+    /// dropped everything else, and without a word about it a filtered read looks exactly like an
+    /// empty backlog: the assistant would cheerfully report that the user has nothing at all.
+    /// </summary>
+    private static string? FilterNote(ItemTypeScope kinds, SourceScope sources)
+    {
+        var narrowed = new List<string>();
+        if (sources.Active) narrowed.Add($"the systems {sources.Description}");
+        if (kinds.Active) narrowed.Add($"the kinds {kinds.Description}");
+        if (narrowed.Count == 0) return null;
+
+        return $"The user has filtered the console to {string.Join(" and ", narrowed)}. Anything " +
+               "outside that exists but was not returned — mention the filter rather than saying " +
+               "they have none.";
+    }
 
     /// <summary>
     /// One ticket as the single line a listing should show: id, title, status, priority, and only
@@ -163,7 +174,7 @@ public static class TicketTools
     /// names/types and the description text are effectively the model's API documentation.
     /// </summary>
     public static IReadOnlyList<AIFunction> Build(
-        ITicketProvider provider, UndoStore undo, ItemTypeScope scope)
+        ITicketProvider provider, UndoStore undo, ItemTypeScope kinds, SourceScope sources)
     {
         return
         [
@@ -194,7 +205,7 @@ public static class TicketTools
 
             AIFunctionFactory.Create(
                 async (string query, CancellationToken ct) =>
-                    GroupByKindAndSource(await provider.SearchTicketsAsync(query, ct), scope),
+                    GroupByKindAndSource(await provider.SearchTicketsAsync(query, ct), kinds, sources),
                 name: "search_tickets",
                 description: "Search everything assigned to or raised by the user — tickets, tasks, and " +
                               "any other kind of item — by words in their title, description or labels " +
@@ -215,7 +226,7 @@ public static class TicketTools
                     GroupByKindAndSource(
                         await provider.ListTicketsAsync(
                             ParseEnum<TicketStatus>(status), ParseEnum<TicketPriority>(priority), type, ct),
-                        scope),
+                        kinds, sources),
                 name: "list_tickets",
                 description: "List everything the user raised or is assigned — tickets, tasks, and any " +
                               "other kind of item — optionally filtered by status (Open, InProgress, " +

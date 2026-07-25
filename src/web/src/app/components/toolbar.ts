@@ -1,14 +1,17 @@
-import { Component, EventEmitter, HostListener, Input, Output, inject, signal } from '@angular/core';
+import { Component, EventEmitter, Input, Output, inject, signal } from '@angular/core';
 import { LlmService } from '../services/llm.service';
 import { SessionService } from '../services/session.service';
 import { JiraService } from '../services/jira.service';
 import { ProjectsService } from '../services/projects.service';
 import { DebugService } from '../services/debug.service';
 import { KindsService } from '../services/kinds.service';
+import { SourcesService } from '../services/sources.service';
+import { FilterPill } from './filter-pill';
 
 /**
- * The header's controls, in two groups. On the left, what you're looking at: which kinds of item,
- * and who you are (which scopes the mock). On the right, how the machine is set up: provider, model,
+ * The header's controls, in two groups. On the left, what you're looking at: which systems, which
+ * kinds of item, and who you are (which scopes the mock). On the right, how the machine is set up:
+ * LLM provider, model,
  * GPU vs CPU with a live status badge, the debug console, and — when Jira is enabled — the
  * connect/disconnect control. The split is the point: the left pair changes the answers you get, the
  * right group changes the machinery that produces them.
@@ -19,42 +22,43 @@ import { KindsService } from '../services/kinds.service';
 @Component({
   selector: 'app-toolbar',
   standalone: true,
+  imports: [FilterPill],
   template: `
     <div class="bar">
       <div class="grp">
-        <!-- What the assistant is allowed to look at. Nothing ticked = everything; the API enforces
-             the choice on reads, so it holds regardless of what the model decides to do. -->
-        <div class="kinds" [class.open]="kindsOpen()">
-          <button class="ghost k-btn" [class.on]="kinds.active().length" (click)="toggleKinds($event)"
-                  [title]="kinds.active().length ? 'Reads are limited to: ' + kinds.active().join(', ') : 'Reads cover every kind of item'">
-            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor"
-                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M3 5h18M6 12h12M10 19h4"/>
-            </svg>
-            {{ kinds.summary() }}
-          </button>
+        <!-- Where the assistant reads from, then what it reads. Both are enforced by the API on
+             every read, so they hold regardless of what the model decides to do; the wider question
+             (which system) sits left of the narrower one (which kind of item). -->
+        <app-filter-pill
+          [summary]="sources.summary()" [options]="sources.available()"
+          [selected]="sources.active()" allLabel="All sources"
+          emptyHint="No backends have answered yet."
+          hint="Which systems the assistant reads from"
+          (toggled)="sources.toggle($event)" (cleared)="sources.clear()">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6"/>
+            <path d="M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/>
+          </svg>
+        </app-filter-pill>
 
-          @if (kindsOpen()) {
-            <div class="pop" (click)="$event.stopPropagation()">
-              @if (kinds.available().length) {
-                <button class="all" [class.on]="!kinds.active().length" (click)="kinds.clear()">All kinds</button>
-                @for (k of kinds.available(); track k) {
-                  <label class="k-row">
-                    <input type="checkbox" [checked]="kinds.isOn(k)" (change)="kinds.toggle(k)" />
-                    <span class="k-name">{{ k }}</span>
-                  </label>
-                }
-                <p class="hint">Nothing ticked means every kind.</p>
-              } @else {
-                <p class="hint">No kinds yet — connect a backend first.</p>
-              }
-            </div>
-          }
-        </div>
+        <app-filter-pill
+          [summary]="kinds.summary()" [options]="kinds.options()"
+          [selected]="kinds.active()" allLabel="All kinds"
+          emptyHint="No kinds yet — connect a backend first."
+          hint="Which kinds of item the assistant reads"
+          (toggled)="kinds.toggle($event)" (cleared)="kinds.clear()">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M3 5h18M6 12h12M10 19h4"/>
+          </svg>
+        </app-filter-pill>
 
-        <div class="ctl">
+        <div class="ctl" title="Who you are on the mock board. 'nobody' owns nothing there, so reads come only from connected accounts like Jira.">
           <span class="lbl">User</span>
-          <input class="inp user" [value]="session.userName()" (change)="onUser($any($event.target).value)" />
+          <select class="sel user" [value]="session.userName()" (change)="onUser($any($event.target).value)">
+            @for (u of session.users; track u) { <option [value]="u">{{ u || 'nobody' }}</option> }
+          </select>
         </div>
       </div>
 
@@ -74,10 +78,9 @@ import { KindsService } from '../services/kinds.service';
 
       <div class="ctl">
         <span class="lbl">Model</span>
-        <input list="ollama-models" class="inp model" [value]="llm.model()" (change)="llm.setModel($any($event.target).value)" />
-        <datalist id="ollama-models">
-          @for (m of llm.ollamaModels(); track m) { <option [value]="m"></option> }
-        </datalist>
+        <select class="sel model" [value]="llm.model()" (change)="llm.setModel($any($event.target).value)">
+          @for (m of llm.modelsFor(); track m) { <option [value]="m">{{ m }}</option> }
+        </select>
       </div>
 
       <div class="ctl">
@@ -132,26 +135,23 @@ import { KindsService } from '../services/kinds.service';
     @if (error()) { <div class="err">{{ error() }}</div> }
   `,
   styles: [`
-    /* One height for every pill in the bar. The .ctl pills can't take it directly — they're sized
-       by padding on purpose (see below) — so it mirrors what their padding adds up to:
-       control line box (1.15rem) + vertical padding (2 x 0.5rem) + border (2 x 1px). Anything with
-       an explicit height uses this so it sits level with them. */
-    :host { display: block; --pill-h: calc(1.15rem + 1rem + 2px); }
+    /* One height for everything in the header, the New chat button included (app.css uses the same
+       34px). Every pill takes it explicitly and centres its contents, so nothing depends on a
+       control's intrinsic line box any more — which is what used to leave the text in a pill sitting
+       a pixel off its middle. */
+    :host { display: block; --pill-h: 34px; }
     .bar { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
     /* Two clusters, pushed apart: reading scope on the left, machinery on the right. Each wraps on
        its own so a narrow window stacks the groups instead of interleaving them. */
     .grp { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
     .grp.right { margin-left: auto; justify-content: flex-end; }
 
-    /* A fixed height plus a shared line-height on every child is what actually lines the tiny
-       uppercase label up with the input/select text — flex centring alone leaves them optically
-       off, because form controls and spans have different intrinsic line boxes. */
-    /* Height comes from padding, not a fixed value: baseline alignment inside a fixed-height flex
-       box packs the content to the top. With both control types on equal explicit heights, padding
-       sizing still yields identical pills. */
+    /* Label and value are centred together as one row. Now that both are the same kind of control
+       (a select) with the same line box, centring lines them up without the baseline gymnastics the
+       text inputs needed — and the row as a whole sits in the middle of the pill. */
     .ctl {
-      display: flex; align-items: baseline; gap: 0.45rem;
-      padding: 0.5rem 0.7rem;
+      display: flex; align-items: center; gap: 0.45rem;
+      height: var(--pill-h); padding: 0 0.7rem;
       background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-full);
       transition: border-color 0.15s var(--ease), background 0.15s var(--ease);
     }
@@ -164,16 +164,11 @@ import { KindsService } from '../services/kinds.service';
       color: var(--text-faint); font-weight: 700;
       line-height: 1; white-space: nowrap;
     }
-    /* Inputs and selects must share an explicit height: a select's UA box is taller than an
-       input's, which under baseline alignment pushed the select pills' text ~2.5px higher than
-       the input pills'. Equal boxes give both the same baseline position inside the pill. */
-    .inp, .sel {
+    .sel {
       background: transparent; border: 0; color: var(--text); font-size: 0.8rem;
       padding: 0; margin: 0; line-height: 1.15; height: 1.15rem;
     }
-    .inp:focus, .sel:focus { outline: none; }
-    .inp.model { width: 8.5rem; }
-    .inp.user { width: 5rem; }
+    .sel:focus { outline: none; }
     /* A native select won't honour line-height (the UA lays out its own inner box), which is what
        kept the dropdowns sitting low next to their labels. Strip the native appearance and draw
        the caret ourselves, so the text uses our line box like every other control. */
@@ -225,42 +220,6 @@ import { KindsService } from '../services/kinds.service';
       box-shadow: inset 0 0 0 1px rgba(124, 108, 255, 0.15);
     }
 
-    /* The kind toggles hang under their pill rather than sitting in the bar: a Jira site can offer
-       half a dozen issue types, and inline chips for each would wrap the header onto a second row. */
-    .kinds { position: relative; }
-    .ghost.k-btn { gap: 0.4rem; font-weight: 600; max-width: 12rem; }
-    .ghost.k-btn.on {
-      background: rgba(124, 108, 255, 0.16); border-color: rgba(150, 120, 255, 0.6); color: #ded8ff;
-    }
-    .kinds.open .ghost.k-btn { border-color: var(--border-strong); }
-
-    .pop {
-      /* Hangs from the pill's left edge, since the pill now sits at the left end of the header. */
-      position: absolute; top: calc(100% + 0.4rem); left: 0; z-index: 30;
-      min-width: 13rem; max-width: 20rem; max-height: 60vh; overflow: auto;
-      padding: 0.45rem; border-radius: var(--r); text-align: left;
-      background: rgba(14, 16, 24, 0.96); border: 1px solid var(--border-strong);
-      backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
-      box-shadow: var(--shadow-lg); animation: rise 0.15s var(--ease);
-    }
-    .pop .all {
-      display: block; width: 100%; text-align: left; margin-bottom: 0.2rem;
-      padding: 0.34rem 0.45rem; border-radius: var(--r-sm); border: 1px solid transparent;
-      background: transparent; color: var(--text-dim); font-size: 0.76rem; font-weight: 600;
-    }
-    .pop .all:hover { background: var(--surface-2); color: var(--text); }
-    .pop .all.on { background: rgba(124, 108, 255, 0.16); border-color: rgba(150, 120, 255, 0.5); color: #ded8ff; }
-
-    .k-row {
-      display: flex; align-items: center; gap: 0.5rem;
-      padding: 0.3rem 0.45rem; border-radius: var(--r-sm); cursor: pointer;
-      font-size: 0.78rem; color: var(--text);
-    }
-    .k-row:hover { background: var(--surface-2); }
-    .k-row input { accent-color: var(--accent); flex-shrink: 0; }
-    .k-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .pop .hint { margin: 0.35rem 0.45rem 0.15rem; font-size: 0.68rem; color: var(--text-faint); line-height: 1.45; }
-
     .jira-pill {
       display: flex; align-items: center; gap: 0.4rem;
       font-size: 0.75rem; color: #cfeadd; line-height: 1;
@@ -282,28 +241,12 @@ export class Toolbar {
   readonly jira = inject(JiraService);
   readonly debug = inject(DebugService);
   readonly kinds = inject(KindsService);
+  readonly sources = inject(SourcesService);
   private readonly projects = inject(ProjectsService);
 
   readonly connecting = signal(false);
   readonly error = signal<string | null>(null);
-  readonly kindsOpen = signal(false);
 
-  // A click anywhere else closes the kind list, and Escape does too — a panel that can only be
-  // dismissed by the button that opened it is a panel people leave open by accident.
-  @HostListener('document:click')
-  onDocumentClick(): void {
-    this.kindsOpen.set(false);
-  }
-
-  @HostListener('document:keydown.escape')
-  onEscape(): void {
-    this.kindsOpen.set(false);
-  }
-
-  toggleKinds(event: Event): void {
-    event.stopPropagation();   // this click must not reach the document handler above
-    this.kindsOpen.update((open) => !open);
-  }
 
   onUser(name: string): void {
     const trimmed = name.trim();

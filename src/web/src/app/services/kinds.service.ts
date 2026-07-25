@@ -24,6 +24,9 @@ export class KindsService {
   /** The kinds on offer, in the order the backends report them (mock first, then each Jira site). */
   readonly available = computed(() => this.projects.itemTypes());
 
+  /** The same list in the filter pill's shape — a kind is its own label. */
+  readonly options = computed(() => this.available().map((kind) => ({ value: kind, label: kind })));
+
   /**
    * A selected kind no longer on offer (Jira disconnected, say) is dropped rather than sent: the API
    * would filter every item out, and an empty screen is a worse answer than an unfiltered one. Same
@@ -31,9 +34,7 @@ export class KindsService {
    */
   readonly active = computed(() => {
     const offered = this.available();
-    return offered.length
-      ? offered.filter((kind) => this.selected().has(kind))
-      : [];
+    return offered.filter((kind) => this.selected().has(kind));
   });
 
   /** What the toolbar pill says: the filter at a glance, without opening it. */
