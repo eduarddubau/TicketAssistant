@@ -1,4 +1,4 @@
-import { Component, HostListener, OnInit, computed, effect, inject, signal } from '@angular/core';
+import { Component, HostListener, OnInit, computed, effect, inject, signal, untracked } from '@angular/core';
 import { Toolbar } from './components/toolbar';
 import { Chat } from './components/chat';
 import { DebugConsole } from './components/debug-console';
@@ -8,6 +8,7 @@ import { JiraService } from './services/jira.service';
 import { ProjectsService } from './services/projects.service';
 import { ApiService } from './services/api.service';
 import { DebugService } from './services/debug.service';
+import { KindsService } from './services/kinds.service';
 import { ConversationInfo } from './models';
 
 @Component({
@@ -18,21 +19,61 @@ import { ConversationInfo } from './models';
   styleUrl: './app.css',
 })
 export class App implements OnInit {
-  private readonly session = inject(SessionService);
+  readonly session = inject(SessionService);
   private readonly llm = inject(LlmService);
   private readonly api = inject(ApiService);
   private readonly projects = inject(ProjectsService);
   readonly jira = inject(JiraService);
   readonly debug = inject(DebugService);
+  private readonly kinds = inject(KindsService);
 
   readonly conversation = signal<ConversationInfo | null>(null);
 
   constructor() {
     // Opening the panel — at startup or halfway through a chat — pulls in the system prompt so
-    // the trace starts with the instructions everything else is a reaction to.
+    // the trace starts with the instructions everything else is a reaction to, plus a line saying
+    // where the settings currently stand.
     effect(() => {
-      if (this.debug.enabled()) void this.api.traceSystemPrompt();
+      if (!this.debug.enabled()) return;
+      void this.api.traceSystemPrompt();
+      // untracked: this reads the model/connection/filter signals, and the effect must fire when
+      // the panel opens — not again every time one of them changes (they trace themselves).
+      untracked(() => this.traceSettings());
     });
+  }
+
+  /**
+   * Where things stand the moment the panel opens: which model answers, whether an external account
+   * is connected, and what the kind filter is. Every other line in the trace is an event, and events
+   * from before the panel was opened were never recorded — so without this, a mid-chat trace reads as
+   * if the turn had no settings behind it at all. Accounts by name, never a token: the browser holds
+   * an opaque session id and nothing else.
+   */
+  private traceSettings(): void {
+    const jira = this.jira.status();
+    const kinds = this.kinds.active();
+    const model = `${this.llm.provider() || '?'} · ${this.llm.model() || '?'}`;
+    const connection = this.jiraEnabled()
+      ? jira.connected
+        ? `Jira connected${jira.accountEmail ? ` as ${jira.accountEmail}` : ''} · ${jira.sites?.length ?? 0} site(s)`
+        : 'Jira enabled but not connected'
+      : 'no external ticket account in use';
+
+    this.debug.client(
+      'settings',
+      `${model} · ${connection} · kinds: ${kinds.length ? kinds.join(', ') : 'all'}`,
+      {
+        model: { provider: this.llm.provider(), model: this.llm.model(), compute: this.llm.compute() || 'auto' },
+        jira: {
+          backendEnabled: this.jiraEnabled(),
+          connected: jira.connected,
+          accountEmail: jira.accountEmail ?? null,
+          sites: jira.sites?.map((s) => s.name) ?? [],
+        },
+        kindFilter: kinds.length ? kinds : 'all kinds',
+        user: this.session.userName(),
+      },
+    );
   }
 
   // Whether the Jira backend is in play (drives the optional connect prompt). Chat itself is

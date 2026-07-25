@@ -23,6 +23,21 @@ export class ProjectsService {
     return map;
   });
 
+  /**
+   * Every kind of item the connected projects accept, de-duplicated, in the order the backends
+   * report them — the options behind the header's kind toggles. Case-insensitive de-duplication:
+   * two sites can spell the same issue type differently.
+   */
+  readonly itemTypes = computed(() => {
+    const seen = new Map<string, string>();
+    for (const p of this.projects()) {
+      for (const kind of p.itemTypes ?? []) {
+        if (!seen.has(kind.toLowerCase())) seen.set(kind.toLowerCase(), kind);
+      }
+    }
+    return [...seen.values()];
+  });
+
   siteUrlForProjectKey(projectKey: string): string | null {
     return this.projectSites().get(projectKey.toUpperCase()) ?? null;
   }

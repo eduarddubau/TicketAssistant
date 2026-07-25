@@ -28,7 +28,9 @@ export interface DebugEntry {
   stage: string;
   label: string;
   detail?: unknown;
-  ms?: number | null;               // how long the step took, when that's meaningful
+  ms?: number | null;               // how long the step took, when the step measured itself
+  sinceMs?: number;                 // gap since the previous step — every row's own cost
+  turnMs?: number;                  // how far into the current turn this step happened
 }
 
 // A rendered line in the chat log.

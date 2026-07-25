@@ -4,6 +4,7 @@ import { ConversationInfo, OrchestrationEvent } from '../models';
 import { SessionService } from './session.service';
 import { LlmService } from './llm.service';
 import { DebugService } from './debug.service';
+import { KindsService } from './kinds.service';
 
 /**
  * The chat API. Reads are plain JSON; the message/confirm calls return Server-Sent Events, which
@@ -19,6 +20,7 @@ export class ApiService {
   private readonly session = inject(SessionService);
   private readonly llm = inject(LlmService);
   private readonly debug = inject(DebugService);
+  private readonly kinds = inject(KindsService);
 
   async createConversation(): Promise<ConversationInfo> {
     const res = await fetch(`${API_BASE}/api/conversations`, {
@@ -62,7 +64,13 @@ export class ApiService {
   }
 
   private async stream(url: string, body: unknown, onEvent: (e: OrchestrationEvent) => void): Promise<void> {
-    const headers = { 'Content-Type': 'application/json', ...this.session.authHeader(), ...this.llm.headers(), ...this.debug.headers() };
+    const headers = {
+      'Content-Type': 'application/json',
+      ...this.session.authHeader(),
+      ...this.llm.headers(),
+      ...this.kinds.headers(),
+      ...this.debug.headers(),
+    };
     const startedAt = performance.now();
 
     this.debug.client('http_request', `POST ${new URL(url).pathname}`, { url, headers: redact(headers), body });

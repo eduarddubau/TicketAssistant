@@ -172,6 +172,7 @@ Every switcher in the header takes effect on the next message — no restart:
 | **Model** | Which model answers. A text field, with a dropdown of the models actually installed in Ollama. |
 | **Provider** | Ollama / Anthropic / OpenAI / Google. A provider with no API key configured is visibly disabled. |
 | **Compute** | Ollama only: *GPU* (used when the container has one) or *CPU* (forced). |
+| **Kinds** | Which kinds of item reads cover — tick any combination of the types your projects actually offer, or none for all of them. Enforced by the API, not asked of the model, so it holds whatever the model decides to do. |
 | *status badge* | Where the loaded model is **actually** running, straight from Ollama's own report: `GPU`, `CPU`, a split when the model doesn't fully fit in VRAM, or idle — and `GPU off` when the machine has an NVIDIA GPU the container isn't using. |
 | **User** | Who you are; the mock scopes tickets to this user. Defaults to `alice`, who owns the seed tickets — change it to test isolation. |
 | **Debug** | Opens the debug console (below). Also `Ctrl` + `` ` ``. |
@@ -200,7 +201,15 @@ received, `api` rows are what the loop did:
 - **every guardrail that fired** — a blocked create, a duplicate match, a bounced replay, a
   malformed tool call — and what the model was told instead;
 - **each confirmation**: what was proposed, what you edited, what finally ran, and what "undo that"
-  would now reverse.
+  would now reverse;
+- **every setting that changed under the conversation** — switching model, provider or GPU/CPU,
+  connecting or disconnecting a Jira account, changing the kind filter — because a switch made three
+  turns ago is invisible in the transcript but explains the reply. Accounts by name and which
+  providers have credentials; never a token, which the browser doesn't hold anyway. Opening the panel
+  mid-chat writes one line saying where all of that currently stands;
+- **how long every step took**: each row carries the wait before it (`+1.41 s`, highlighted past a
+  second), the duration the step measured for itself where there is one, and — on hover — how far
+  into the turn it happened. The slow step in a 30-second turn is findable by eye.
 
 Click a row to expand it; conversation snapshots get a readable view and the untouched JSON sits
 underneath. Filter by text, mute stages you don't care about, drag the edge to widen it, and copy or

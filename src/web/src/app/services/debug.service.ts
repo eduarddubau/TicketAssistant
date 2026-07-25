@@ -22,6 +22,12 @@ export class DebugService {
 
   private nextId = 1;
 
+  // For the two timings every row carries. A turn starts when the user does something — sends a
+  // message, or answers a confirmation card — so the offset measures the wait they actually feel,
+  // and the gap between consecutive rows shows where that wait went.
+  private turnStartedAt = 0;
+  private lastAt = 0;
+
   /** The header that asks the API to stream its trace, when the console is on. */
   headers(): Record<string, string> {
     return this.enabled() ? { 'X-Debug': '1' } : {};
@@ -62,7 +68,21 @@ export class DebugService {
   private add(source: 'client' | 'server', stage: string, label: string, detail?: unknown, ms?: number | null): void {
     if (!this.enabled()) return;
 
-    const entry: DebugEntry = { id: this.nextId++, at: Date.now(), source, stage, label, detail, ms };
+    const at = Date.now();
+    if (stage === 'user_prompt' || stage === 'decision') this.turnStartedAt = at;
+
+    const entry: DebugEntry = {
+      id: this.nextId++,
+      at,
+      source,
+      stage,
+      label,
+      detail,
+      ms,
+      sinceMs: this.lastAt ? at - this.lastAt : undefined,
+      turnMs: this.turnStartedAt ? at - this.turnStartedAt : undefined,
+    };
+    this.lastAt = at;
     this.entries.update((list) => {
       const next = [...list, entry];
       return next.length > DebugService.MAX_ENTRIES ? next.slice(next.length - DebugService.MAX_ENTRIES) : next;

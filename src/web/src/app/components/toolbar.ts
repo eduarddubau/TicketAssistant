@@ -1,15 +1,16 @@
-import { Component, EventEmitter, Input, Output, inject, signal } from '@angular/core';
+import { Component, EventEmitter, HostListener, Input, Output, inject, signal } from '@angular/core';
 import { LlmService } from '../services/llm.service';
 import { SessionService } from '../services/session.service';
 import { JiraService } from '../services/jira.service';
 import { ProjectsService } from '../services/projects.service';
 import { DebugService } from '../services/debug.service';
+import { KindsService } from '../services/kinds.service';
 
 /**
- * The config strip: who you are (scopes the mock), which LLM/model to use, GPU vs CPU for Ollama
- * with a live status badge, and — when Jira is enabled — the connect/disconnect control. All of it
- * just tweaks headers or session state; only a change of user needs a fresh conversation, which it
- * signals to the parent.
+ * The config strip: who you are (scopes the mock), which kinds of item you're looking at, which
+ * LLM/model to use, GPU vs CPU for Ollama with a live status badge, and — when Jira is enabled — the
+ * connect/disconnect control. All of it just tweaks headers or session state; only a change of user
+ * needs a fresh conversation, which it signals to the parent.
  */
 @Component({
   selector: 'app-toolbar',
@@ -51,6 +52,36 @@ import { DebugService } from '../services/debug.service';
           {{ cs.loaded ? cs.processor : (cs.gpuAttached ? 'GPU idle' : (cs.hostHasGpu ? 'GPU off' : 'CPU')) }}
         </span>
       }
+
+      <!-- What the assistant is allowed to look at. Nothing ticked = everything; the API enforces
+           the choice on reads, so it holds regardless of what the model decides to do. -->
+      <div class="kinds" [class.open]="kindsOpen()">
+        <button class="ghost k-btn" [class.on]="kinds.active().length" (click)="toggleKinds($event)"
+                [title]="kinds.active().length ? 'Reads are limited to: ' + kinds.active().join(', ') : 'Reads cover every kind of item'">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M3 5h18M6 12h12M10 19h4"/>
+          </svg>
+          {{ kinds.summary() }}
+        </button>
+
+        @if (kindsOpen()) {
+          <div class="pop" (click)="$event.stopPropagation()">
+            @if (kinds.available().length) {
+              <button class="all" [class.on]="!kinds.active().length" (click)="kinds.clear()">All kinds</button>
+              @for (k of kinds.available(); track k) {
+                <label class="k-row">
+                  <input type="checkbox" [checked]="kinds.isOn(k)" (change)="kinds.toggle(k)" />
+                  <span class="k-name">{{ k }}</span>
+                </label>
+              }
+              <p class="hint">Nothing ticked means every kind.</p>
+            } @else {
+              <p class="hint">No kinds yet — connect a backend first.</p>
+            }
+          </div>
+        }
+      </div>
 
       <span class="sep"></span>
 
@@ -180,6 +211,41 @@ import { DebugService } from '../services/debug.service';
       box-shadow: inset 0 0 0 1px rgba(124, 108, 255, 0.15);
     }
 
+    /* The kind toggles hang under their pill rather than sitting in the bar: a Jira site can offer
+       half a dozen issue types, and inline chips for each would wrap the header onto a second row. */
+    .kinds { position: relative; }
+    .ghost.k-btn { gap: 0.4rem; font-weight: 600; max-width: 12rem; }
+    .ghost.k-btn.on {
+      background: rgba(124, 108, 255, 0.16); border-color: rgba(150, 120, 255, 0.6); color: #ded8ff;
+    }
+    .kinds.open .ghost.k-btn { border-color: var(--border-strong); }
+
+    .pop {
+      position: absolute; top: calc(100% + 0.4rem); right: 0; z-index: 30;
+      min-width: 13rem; max-width: 20rem; max-height: 60vh; overflow: auto;
+      padding: 0.45rem; border-radius: var(--r); text-align: left;
+      background: rgba(14, 16, 24, 0.96); border: 1px solid var(--border-strong);
+      backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+      box-shadow: var(--shadow-lg); animation: rise 0.15s var(--ease);
+    }
+    .pop .all {
+      display: block; width: 100%; text-align: left; margin-bottom: 0.2rem;
+      padding: 0.34rem 0.45rem; border-radius: var(--r-sm); border: 1px solid transparent;
+      background: transparent; color: var(--text-dim); font-size: 0.76rem; font-weight: 600;
+    }
+    .pop .all:hover { background: var(--surface-2); color: var(--text); }
+    .pop .all.on { background: rgba(124, 108, 255, 0.16); border-color: rgba(150, 120, 255, 0.5); color: #ded8ff; }
+
+    .k-row {
+      display: flex; align-items: center; gap: 0.5rem;
+      padding: 0.3rem 0.45rem; border-radius: var(--r-sm); cursor: pointer;
+      font-size: 0.78rem; color: var(--text);
+    }
+    .k-row:hover { background: var(--surface-2); }
+    .k-row input { accent-color: var(--accent); flex-shrink: 0; }
+    .k-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .pop .hint { margin: 0.35rem 0.45rem 0.15rem; font-size: 0.68rem; color: var(--text-faint); line-height: 1.45; }
+
     .jira-pill {
       display: flex; align-items: center; gap: 0.4rem;
       font-size: 0.75rem; color: #cfeadd; line-height: 1;
@@ -200,10 +266,29 @@ export class Toolbar {
   readonly session = inject(SessionService);
   readonly jira = inject(JiraService);
   readonly debug = inject(DebugService);
+  readonly kinds = inject(KindsService);
   private readonly projects = inject(ProjectsService);
 
   readonly connecting = signal(false);
   readonly error = signal<string | null>(null);
+  readonly kindsOpen = signal(false);
+
+  // A click anywhere else closes the kind list, and Escape does too — a panel that can only be
+  // dismissed by the button that opened it is a panel people leave open by accident.
+  @HostListener('document:click')
+  onDocumentClick(): void {
+    this.kindsOpen.set(false);
+  }
+
+  @HostListener('document:keydown.escape')
+  onEscape(): void {
+    this.kindsOpen.set(false);
+  }
+
+  toggleKinds(event: Event): void {
+    event.stopPropagation();   // this click must not reach the document handler above
+    this.kindsOpen.update((open) => !open);
+  }
 
   onUser(name: string): void {
     const trimmed = name.trim();

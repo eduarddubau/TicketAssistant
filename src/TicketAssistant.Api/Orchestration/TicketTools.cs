@@ -45,9 +45,11 @@ public static class TicketTools
     private sealed record TicketGroup(string Heading, IReadOnlyList<string> Items);
 
     /// <summary>
-    /// A read result: how to present it, and the items grouped by what they are and where they live.
+    /// A read result: how to present it, the filter the user has on (absent when none), and the items
+    /// grouped by what they are and where they live.
     /// </summary>
-    private sealed record GroupedTickets(string Instructions, IReadOnlyList<TicketGroup> Groups);
+    private sealed record GroupedTickets(
+        string Instructions, string? Filter, IReadOnlyList<TicketGroup> Groups);
 
     /// <summary>
     /// Carried at the top of every grouped read. Instructions travel with the data rather than
@@ -55,26 +57,34 @@ public static class TicketTools
     /// 3B model reliably reads them — the same reason the duplicate guardrail spells out what to do
     /// inside its tool result instead of trusting the standing instructions.
     ///
-    /// A worked example, not a rule: told in prose to keep lines short, a 3B model reproduced the
+    /// A shape, not a worked example. Told in prose to keep lines short, a 3B model reproduced the
     /// JSON it had been handed instead — every field of every ticket, under invented headings like
-    /// "Group 1" and "Section Heading". Shown the exact output shape, it copies it.
+    /// "Group 1" and "Section Heading". Shown a realistic sample answer, it copied the *sample*:
+    /// a reply opened with "Tasks in Jira — SCRUM-1 · test task" on a session with no Jira connected,
+    /// because a plausible example and real data are indistinguishable to it. So the template uses
+    /// angle-bracket placeholders and no ids at all — there is nothing in it worth copying.
     /// </summary>
     private const string GroupedTicketsInstructions =
         """
-        Write the answer exactly like this — one bold line per entry in 'groups' (its 'heading',
-        copied word for word), then that group's 'items' as bullets, each string copied as it is:
+        Write the answer as one bold line per entry in 'groups' followed by that group's 'items' as
+        bullets, copying each string exactly and changing none of it:
 
-        **Tasks in Jira**
-        - SCRUM-1 · test task — Open, Medium
-        - HELP-2 · Internet is down — Open, Urgent
+        **<this group's heading>**
+        - <this group's first item>
+        - <this group's next item>
 
-        **Tickets in the mock board (demo data, not real work)**
-        - PROJ-1001 · Login page returns 500 on submit — Open, High
+        **<the next group's heading>**
+        - <that group's first item>
 
-        Keep every group and every item, in the order given. At most one short sentence of your own
-        before the list (and a word about anything OVERDUE after it). Never add fields, never print
-        field names, JSON, timestamps or URLs, and never invent headings like "Group 1" or
-        "Section Heading". If 'groups' is empty, just say nothing matched.
+        Everything you list must come from 'groups' — the angle brackets above are placeholders, not
+        content, so never write an id, title or heading that isn't in the data. Keep every group and
+        every item, in the order given. At most one short sentence of your own before the list (and a
+        word about anything OVERDUE after it). Never add fields, never print field names, JSON,
+        timestamps or URLs, and never invent headings like "Group 1" or "Section Heading". If
+        'groups' is empty, just say nothing matched.
+
+        If a 'filter' is present, the user has narrowed the console to certain kinds of item: say so
+        in that one sentence, and never suggest the kinds it hides don't exist.
         """;
 
     /// <summary>
@@ -86,9 +96,18 @@ public static class TicketTools
     /// beyond the line (description, labels, reporter, links) come from get_ticket, which still
     /// returns the whole ticket. Ordered by heading so repeated questions come back the same way.
     /// </summary>
-    private static GroupedTickets GroupByKindAndSource(IEnumerable<CanonicalTicket> tickets) =>
+    private static GroupedTickets GroupByKindAndSource(
+        IEnumerable<CanonicalTicket> tickets, ItemTypeScope scope) =>
         new(GroupedTicketsInstructions,
-            tickets.GroupBy(t => (t.TypePlural, t.Source))
+            // Spelled out for the model, not enforced by it (ItemTypeScope has already dropped the
+            // rest): without this note a filtered read reads exactly like an empty backlog, and the
+            // assistant would cheerfully report that the user has no tickets at all.
+            Filter: scope.Active
+                ? $"The user has filtered the console to {scope.Description}. Other kinds of item " +
+                  "exist but were not returned — mention the filter rather than saying they have none."
+                : null,
+            Groups: tickets.Where(t => scope.Allows(t.Type))
+                   .GroupBy(t => (t.TypePlural, t.Source))
                    .Select(g => new TicketGroup(
                        Heading: $"{g.Key.TypePlural} in {g.Key.Source}",
                        Items: g.Select(Line).ToList()))
@@ -143,7 +162,8 @@ public static class TicketTools
     /// inspects the lambda's parameters to generate the schema the model sees, so parameter
     /// names/types and the description text are effectively the model's API documentation.
     /// </summary>
-    public static IReadOnlyList<AIFunction> Build(ITicketProvider provider, UndoStore undo)
+    public static IReadOnlyList<AIFunction> Build(
+        ITicketProvider provider, UndoStore undo, ItemTypeScope scope)
     {
         return
         [
@@ -174,7 +194,7 @@ public static class TicketTools
 
             AIFunctionFactory.Create(
                 async (string query, CancellationToken ct) =>
-                    GroupByKindAndSource(await provider.SearchTicketsAsync(query, ct)),
+                    GroupByKindAndSource(await provider.SearchTicketsAsync(query, ct), scope),
                 name: "search_tickets",
                 description: "Search everything assigned to or raised by the user — tickets, tasks, and " +
                               "any other kind of item — by words in their title, description or labels " +
@@ -192,8 +212,10 @@ public static class TicketTools
                 // as *required*, so a model omitting it fails argument binding before the tool runs.
                 async (string? status = null, string? priority = null, string? type = null,
                        CancellationToken ct = default) =>
-                    GroupByKindAndSource(await provider.ListTicketsAsync(
-                        ParseEnum<TicketStatus>(status), ParseEnum<TicketPriority>(priority), type, ct)),
+                    GroupByKindAndSource(
+                        await provider.ListTicketsAsync(
+                            ParseEnum<TicketStatus>(status), ParseEnum<TicketPriority>(priority), type, ct),
+                        scope),
                 name: "list_tickets",
                 description: "List everything the user raised or is assigned — tickets, tasks, and any " +
                               "other kind of item — optionally filtered by status (Open, InProgress, " +

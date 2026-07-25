@@ -37,6 +37,10 @@ const STAGE_LABELS: Record<string, string> = {
   sse: 'stream',
   llm_request: 'to model',
   llm_response: 'from model',
+  llm: 'model choice',
+  connection: 'connection',
+  settings: 'settings',
+  filter: 'filter',
   tool_call: 'tool call',
   tool_result: 'tool result',
   guardrail: 'guardrail',
@@ -98,14 +102,18 @@ const STAGE_LABELS: Record<string, string> = {
 
     <div class="list" #list>
       @for (entry of filtered(); track entry.id) {
-        <div class="entry {{ entry.stage }}" [class.open]="opened().has(entry.id)">
-          <button class="row" (click)="toggle(entry.id)">
+        <div class="entry {{ entry.stage }}" [class.open]="opened().has(entry.id)"
+             [class.slow]="(entry.sinceMs ?? 0) >= 1000">
+          <button class="row" (click)="toggle(entry.id)" [title]="rowTitle(entry)">
             <span class="chev">{{ opened().has(entry.id) ? '▾' : '▸' }}</span>
             <span class="time">{{ time(entry.at) }}</span>
+            <!-- How long this step waited for the one before it. Present on every row, which is
+                 what makes a slow turn readable: the gap sits on the step that caused it. -->
+            <span class="gap">{{ gap(entry) }}</span>
             <span class="src {{ entry.source }}">{{ entry.source === 'server' ? 'api' : 'web' }}</span>
             <span class="tag">{{ stageLabel(entry.stage) }}</span>
             <span class="label">{{ entry.label }}</span>
-            @if (entry.ms != null) { <span class="ms">{{ entry.ms }} ms</span> }
+            @if (entry.ms != null) { <span class="ms" title="Measured by the step itself">{{ dur(entry.ms) }}</span> }
           </button>
 
           @if (opened().has(entry.id)) {
@@ -248,6 +256,10 @@ const STAGE_LABELS: Record<string, string> = {
     .entry.user_prompt { border-left-color: #e05cff; }
     .entry.system_prompt { border-left-color: #7c6bff; }
     .entry.error { border-left-color: #f43f5e; }
+    .entry.llm { border-left-color: #38bdf8; }
+    .entry.connection { border-left-color: #34d399; }
+    .entry.filter { border-left-color: #fb923c; }
+    .entry.settings { border-left-color: #94a3b8; }
 
     .chip.llm_request, .entry.llm_request .tag { color: #9fb4ff; }
     .chip.llm_response, .entry.llm_response .tag { color: #7fe4ff; }
@@ -258,6 +270,10 @@ const STAGE_LABELS: Record<string, string> = {
     .chip.user_prompt, .entry.user_prompt .tag { color: #f0abfc; }
     .chip.system_prompt, .entry.system_prompt .tag { color: #b9aeff; }
     .chip.error, .entry.error .tag { color: #ffb0b0; }
+    .chip.llm, .entry.llm .tag { color: #7dd3fc; }
+    .chip.connection, .entry.connection .tag { color: #7ff0c4; }
+    .chip.filter, .entry.filter .tag { color: #fdba74; }
+    .chip.settings, .entry.settings .tag { color: #cbd5e1; }
 
     .row {
       display: flex; align-items: baseline; gap: 0.4rem; width: 100%; text-align: left;
@@ -266,6 +282,9 @@ const STAGE_LABELS: Record<string, string> = {
     }
     .chev { color: var(--text-faint); width: 0.7rem; flex-shrink: 0; }
     .time { color: var(--text-faint); font-variant-numeric: tabular-nums; flex-shrink: 0; }
+    /* Fixed width so the numbers line up into a column that can be scanned for the slow step. */
+    .gap { color: var(--text-faint); font-variant-numeric: tabular-nums; flex-shrink: 0; width: 4.2rem; text-align: right; }
+    .entry.slow .gap { color: #fcd34d; font-weight: 600; }
     .src {
       flex-shrink: 0; font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
       padding: 0 0.28rem; border-radius: 4px; background: var(--surface-2); color: var(--text-faint);
@@ -383,6 +402,31 @@ export class DebugConsole {
 
   stageLabel(stage: string): string {
     return STAGE_LABELS[stage] ?? stage.replace(/_/g, ' ');
+  }
+
+  /**
+   * A duration as a person reads it. A local 3B model can take half a minute for one turn, and
+   * "31284 ms" is a number you have to decode before you can compare it to anything.
+   */
+  dur(ms: number): string {
+    if (ms < 1000) return `${Math.round(ms)} ms`;
+    if (ms < 60_000) return `${(ms / 1000).toFixed(ms < 10_000 ? 2 : 1)} s`;
+    const seconds = Math.round(ms / 1000);
+    return `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, '0')}s`;
+  }
+
+  /** The step's own cost: the wait between the previous row and this one. Blank on the first row. */
+  gap(entry: DebugEntry): string {
+    return entry.sinceMs == null ? '' : `+${this.dur(entry.sinceMs)}`;
+  }
+
+  /** Hover text: where in the turn this step happened, and how long the wait before it was. */
+  rowTitle(entry: DebugEntry): string {
+    const parts: string[] = [];
+    if (entry.turnMs != null) parts.push(`${this.dur(entry.turnMs)} into the turn`);
+    if (entry.sinceMs != null) parts.push(`${this.dur(entry.sinceMs)} after the previous step`);
+    if (entry.ms != null) parts.push(`step itself took ${this.dur(entry.ms)}`);
+    return parts.join(' · ');
   }
 
   toggle(id: number): void {

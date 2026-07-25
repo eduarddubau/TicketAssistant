@@ -111,8 +111,13 @@ builder.Services.AddSingleton<ChatClientFactory>();
 // takes the chat client + tools + provider) and the conversation memory. All singletons:
 // one shared instance for the app's lifetime.
 builder.Services.AddSingleton<UndoStore>();
+// Which kinds of item this request may list, from the console's kind toggles (X-Item-Types).
+builder.Services.AddSingleton<ItemTypeScope>();
 builder.Services.AddSingleton(sp =>
-    TicketTools.Build(sp.GetRequiredService<ITicketProvider>(), sp.GetRequiredService<UndoStore>()));
+    TicketTools.Build(
+        sp.GetRequiredService<ITicketProvider>(),
+        sp.GetRequiredService<UndoStore>(),
+        sp.GetRequiredService<ItemTypeScope>()));
 builder.Services.AddSingleton<OrchestrationLoop>();
 builder.Services.AddSingleton<ConversationStore>();
 
