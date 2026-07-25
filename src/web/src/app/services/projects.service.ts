@@ -1,6 +1,6 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
 import { API_BASE } from '../config';
-import { JiraProject } from '../models';
+import { JiraProject, providerLabel } from '../models';
 import { SessionService } from './session.service';
 
 /**
@@ -25,6 +25,44 @@ export class ProjectsService {
 
   siteUrlForProjectKey(projectKey: string): string | null {
     return this.projectSites().get(projectKey.toUpperCase()) ?? null;
+  }
+
+  /** The project a ticket id belongs to ("SUP-12" → the SUP project), if we know it. */
+  projectForTicketId(ticketId: string): JiraProject | null {
+    const dash = ticketId.lastIndexOf('-');
+    const key = (dash > 0 ? ticketId.slice(0, dash) : ticketId).toUpperCase();
+    return this.projects().find((p) => p.key.toUpperCase() === key) ?? null;
+  }
+
+  /** The distinct backends that have projects, for the provider picker. */
+  providers(): string[] {
+    return [...new Set(this.projects().map((p) => p.provider))];
+  }
+
+  /** Sites (workspaces) a provider exposes — empty for providers that have no such concept. */
+  sitesFor(provider: string): string[] {
+    return [...new Set(
+      this.projects().filter((p) => p.provider === provider && p.siteName).map((p) => p.siteName!),
+    )];
+  }
+
+  /** Projects within a provider (and site, when it has them). */
+  projectsFor(provider: string, site?: string | null): JiraProject[] {
+    return this.projects().filter(
+      (p) => p.provider === provider && (!site || p.siteName === site),
+    );
+  }
+
+  /**
+   * Short badge for a ticket id — the system it lives in, plus its site when the provider has
+   * one. The project itself is already legible from the id's prefix (PROJ-1002 → PROJ), so this
+   * carries the part that would otherwise be invisible with several backends connected.
+   */
+  providerBadge(ticketId: string): string | null {
+    const p = this.projectForTicketId(ticketId);
+    if (!p) return null;
+    const label = providerLabel(p.provider);
+    return p.siteName ? `${label} · ${p.siteName}` : label;
   }
 
   async load(): Promise<void> {

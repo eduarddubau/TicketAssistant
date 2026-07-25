@@ -181,6 +181,16 @@ type LogItem =
     .bubble p:first-child { margin-top: 0; } .bubble p:last-child { margin-bottom: 0; }
     .bubble a { color: #cdc6ff; text-decoration: underline; text-underline-offset: 2px; }
     .bubble.user a { color: #fff; }
+    /* Badge naming the system a ticket lives in, so provider/project is visible even when the
+       model doesn't say it. */
+    .bubble .src {
+      display: inline-block; margin-left: 0.3rem; padding: 0.02rem 0.36rem;
+      border-radius: var(--r-full); font-size: 0.68em; font-weight: 600; white-space: nowrap;
+      background: rgba(255, 255, 255, 0.1); border: 1px solid var(--border);
+      color: var(--text-dim); vertical-align: 1px;
+    }
+    .bubble.user .src { background: rgba(255, 255, 255, 0.22); color: #fff; border-color: transparent; }
+
     .bubble code { background: rgba(255, 255, 255, 0.1); padding: 0.1rem 0.34rem; border-radius: 5px; font-size: 0.85em; }
     .bubble.user code { background: rgba(255, 255, 255, 0.2); }
 
@@ -203,7 +213,10 @@ type LogItem =
       background: linear-gradient(transparent, var(--bg)); pointer-events: none;
     }
 
-    .suggestions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.7rem; animation: rise 0.4s var(--ease); }
+    .suggestions {
+      display: flex; flex-wrap: wrap; justify-content: center; gap: 0.5rem;
+      margin-bottom: 0.7rem; animation: rise 0.4s var(--ease);
+    }
     .chip {
       padding: 0.5rem 0.85rem; border-radius: var(--r-full);
       background: var(--surface); border: 1px solid var(--border); color: var(--text-dim); font-size: 0.82rem;
@@ -249,7 +262,8 @@ export class Chat implements OnInit, OnDestroy {
   readonly suggestions = [
     'Show me my open tickets',
     'Anything urgent right now?',
-    'Create a ticket: the login page returns a 500 error',
+    'Create a ticket',
+    'Update an existing ticket',
   ];
 
   private nextId = 1;
@@ -333,7 +347,10 @@ export class Chat implements OnInit, OnDestroy {
   }
 
   private push(role: 'user' | 'assistant' | 'tool' | 'error', text: string, raw = false): void {
-    const html = raw ? this.escape(text) : renderMarkdown(text, (id) => this.ticketHref(id));
+    const html = raw ? this.escape(text) : renderMarkdown(text, {
+      href: (id) => this.ticketHref(id),
+      origin: (id) => this.projectsSvc.providerBadge(id),
+    });
     this.log.update((l) => [...l, { id: this.nextId++, kind: 'msg', role, html }]);
   }
 

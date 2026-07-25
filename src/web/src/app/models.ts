@@ -34,12 +34,24 @@ export interface JiraStatus {
   sites?: JiraSiteInfo[];
 }
 
-// A project the user can create tickets in, tagged with its site (workspace) when several exist.
+// A project the user can create tickets in. Provider, site (workspace) and project are kept as
+// separate fields so the UI can offer them as separate choices — not every provider has sites.
 export interface JiraProject {
   key: string;
   name: string;
-  siteName?: string | null;
+  provider: string;              // "jira" | "mock-ticketing" | "in-memory"
+  siteName?: string | null;      // workspace/site, when the provider has that concept
   siteUrl?: string | null;
+}
+
+/** Display name for a backend id, e.g. "mock-ticketing" → "Mock board". */
+export function providerLabel(provider: string): string {
+  switch (provider) {
+    case 'jira': return 'Jira';
+    case 'mock-ticketing': return 'Mock board';
+    case 'in-memory': return 'In-memory board';
+    default: return provider;
+  }
 }
 
 export interface LlmInfo {
