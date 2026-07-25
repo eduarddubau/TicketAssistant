@@ -130,6 +130,14 @@ button { cursor: pointer; }
   to { offset-distance: 100%; }
 }
 
+/* The interior glow's own motion: a circle about the bubble's middle. The radius is a share of the
+   element's own width, so it's the same orbit whatever shape the bubble is — and it's one transform
+   on one small element, the cheapest kind of animation there is. */
+@keyframes glow-orbit {
+  from { transform: rotate(0deg) translateX(38%); }
+  to { transform: rotate(360deg) translateX(38%); }
+}
+
 /* The user bubble's own life: its gradient fill drifts across it, and the glow beneath it
    breathes. Two separate properties, so the animations compose instead of fighting. */
 @keyframes user-flow {

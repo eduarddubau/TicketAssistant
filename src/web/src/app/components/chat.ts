@@ -143,22 +143,38 @@ type LogItem =
       position: absolute; inset: 0;
       background: conic-gradient(#4f8bff, #9b5cff, #ff5ca8, #38e1ff, #4f8bff);
     }
-    /* The moving layer: a soft point of light running the border. offset-path traces the ring's own
-       rounded rectangle, so it follows the bubble's shape at any size without being told about it.
-       Hidden unless the browser has motion paths — a stationary dot in a corner would be worse than
-       no dot at all — and the still gradient carries the look on its own where that's the case. */
+    /* The moving layer: three lights chasing each other around the border — a white head, a violet
+       and a cyan a third of a lap behind each — so the *colour* travels, not just a highlight. Each
+       is a small element on a motion path tracing the ring's own rounded rectangle, so they follow
+       the bubble's shape at any size without being told about it, and cost the same on a thirty-line
+       reply as on a one-liner. (Rotating the gradient itself is what a conic sweep does, and that
+       repaints the whole bubble every frame.) The two coloured ones are pseudo-elements of the
+       still gradient rather than children of the white one, or they'd ride along with it.
+       All hidden without motion paths — a stationary dot parked in a corner is worse than none —
+       leaving the still gradient to carry the look on its own. */
     .ring b { display: none; }
     @supports (offset-path: border-box) {
-      .ring b {
-        display: block; position: absolute; width: 120px; height: 120px; margin: -60px 0 0 -60px;
-        border-radius: 50%; filter: blur(7px);
-        background: radial-gradient(circle, rgba(255, 255, 255, 0.95), rgba(150, 190, 255, 0.55) 42%, transparent 72%);
+      .ring b, .ring i::before, .ring i::after {
+        display: block; content: ''; position: absolute; border-radius: 50%;
         offset-path: border-box; offset-distance: 0%; offset-rotate: 0deg;
         animation: glow-travel 7s linear infinite;   /* idle: one lap every seven seconds */
       }
+      .ring b {
+        width: 120px; height: 120px; margin: -60px 0 0 -60px; filter: blur(7px);
+        background: radial-gradient(circle, rgba(255, 255, 255, 0.95), rgba(150, 190, 255, 0.55) 42%, transparent 72%);
+      }
+      /* A negative delay is a phase offset: same lap, started a third and two thirds ago. */
+      .ring i::before, .ring i::after {
+        width: 190px; height: 190px; margin: -95px 0 0 -95px; filter: blur(16px);
+      }
+      .ring i::before { background: radial-gradient(circle, rgba(155, 92, 255, 0.95), transparent 70%); animation-delay: -2.33s; }
+      .ring i::after { background: radial-gradient(circle, rgba(56, 225, 255, 0.9), transparent 70%); animation-delay: -4.66s; }
     }
     .ring.hot { opacity: 1; }
-    .ring.hot b { animation-duration: 2.4s; }        /* generating: races */
+    /* Generating: the same lights, racing. */
+    .ring.hot b, .ring.hot i::before, .ring.hot i::after { animation-duration: 2.4s; }
+    .ring.hot i::before { animation-delay: -0.8s; }
+    .ring.hot i::after { animation-delay: -1.6s; }
 
 
     /* Interior glow — only rendered while generating (see the template), so it never sits behind
@@ -167,17 +183,17 @@ type LogItem =
       position: absolute; inset: 0; z-index: 0; pointer-events: none;
       border-radius: 18px; overflow: hidden; opacity: 0.55;
     }
-    /* A bigger, softer companion to the border light, orbiting the other way just inside the wall.
-       Same motion-path trick, same fixed cost. */
-    .inner b { display: none; }
-    @supports (offset-path: border-box) {
-      .inner b {
-        display: block; position: absolute; width: 260px; height: 260px; margin: -130px 0 0 -130px;
-        border-radius: 50%; filter: blur(26px);
-        background: radial-gradient(circle, rgba(155, 92, 255, 0.85), rgba(56, 225, 255, 0.35) 45%, transparent 70%);
-        offset-path: border-box; offset-distance: 0%; offset-rotate: 0deg;
-        animation: glow-travel 5s linear infinite reverse;
-      }
+    /* A bigger, softer glow swinging *inside* the bubble while it writes — a circle about the
+       middle, not another lap of the border: two lights tracing the same rectangle read as one
+       orb sliding around the edge, when what this is meant to say is "something is turning over in
+       here". A rotate + translate on one 260px element, so it stays a composited transform and
+       needs no motion-path support. */
+    .inner b {
+      position: absolute; top: 50%; left: 50%;
+      width: 260px; height: 260px; margin: -130px 0 0 -130px;
+      border-radius: 50%; filter: blur(26px);
+      background: radial-gradient(circle, rgba(155, 92, 255, 0.85), rgba(56, 225, 255, 0.35) 45%, transparent 70%);
+      animation: glow-orbit 5s linear infinite reverse;
     }
 
     .bubble.assistant {
@@ -191,7 +207,7 @@ type LogItem =
 
     /* Motion off: the border keeps its gradient, the travelling lights simply stop. */
     @media (prefers-reduced-motion: reduce) {
-      .ring b, .inner b, .bubble.user { animation: none; }
+      .ring b, .ring i::before, .ring i::after, .inner b, .bubble.user { animation: none; }
     }
 
     /* The user's own words: gradient and glow, but no looping motion — they're a reference point,
