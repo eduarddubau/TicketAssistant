@@ -334,6 +334,26 @@ cd src/web && npm install && npm start         # console on :4200 — open this 
 
 </details>
 
+<details>
+<summary><b>Checking <code>up.ps1</code> from Linux or macOS</b> — the Windows script, without Windows</summary>
+
+`up.ps1` only ever runs for real on Windows, which makes it the easiest file here to break by
+accident. `tools/test-up.ps1` checks it anywhere — no PowerShell install, no containers started, as
+it talks to a fake `podman` (`tools/fakes/`) instead of the real one:
+
+```bash
+./tools/test-up-ps1.sh              # parse + unit + end-to-end dry-run checks
+./tools/test-up-ps1.sh -Analyze     # also PSScriptAnalyzer (downloads the module once)
+```
+
+The runner supplies PowerShell via `mcr.microsoft.com/powershell` (set `CONTAINER_ENGINE=docker` to
+use docker). Three passes: the script is **parsed**, the GPU/keep-alive helpers are lifted out with
+the AST and **called directly** against container states they'd otherwise never see, and up.ps1 is
+then **run start to finish** to assert what it decides — when it re-creates the Ollama container,
+what it hands to compose, and how it ends when the model download fails.
+
+</details>
+
 ## Caveats (it's a PoC)
 
 - **No persistence** — conversations and mock tickets live in memory; a restart wipes everything.

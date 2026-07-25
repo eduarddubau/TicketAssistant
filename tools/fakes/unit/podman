@@ -1,0 +1,19 @@
+#!/bin/bash
+# Stand-in for podman while up.ps1's helper functions are exercised one at a time. What it
+# reports about "the ollama container" is whatever the test exported:
+#   FAKE_CONTAINERS  newline-separated container names (empty = none exist)
+#   FAKE_DEVICES     the device list `podman inspect` would print
+#   FAKE_ENV         the container's environment, one VAR=value per line
+case "$1" in
+  ps)
+    [ -n "$FAKE_CONTAINERS" ] && printf '%s\n' "$FAKE_CONTAINERS"
+    ;;
+  inspect)
+    # The two inspects are told apart by the Go template each one asks for.
+    case "$*" in
+      *HostConfig.Devices*) printf '%s\n' "$FAKE_DEVICES" ;;
+      *Config.Env*)         printf '%s\n' "$FAKE_ENV" ;;
+    esac
+    ;;
+esac
+exit 0

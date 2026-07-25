@@ -1,0 +1,37 @@
+#!/bin/bash
+# Stand-in for podman while up.ps1 is run end to end. Every subcommand succeeds; the calls
+# that decide the outcome echo what they were asked to do so the test can assert on it.
+# Tunable by the test:
+#   FAKE_DEVICES    devices the ollama container was created with (default: an NVIDIA set)
+#   FAKE_KEEPALIVE  the container's OLLAMA_KEEP_ALIVE (default: -1)
+#   FAKE_PROCESSOR  what `ollama ps` reports (default: 100% GPU)
+#   FAKE_PULL_EXIT  exit code of the one-shot model puller (default: 0)
+case "$1 $2" in
+  "compose up")    echo "[fake] compose up args: ${*:3}"; exit 0 ;;
+  "compose build") echo "[fake] compose build";           exit 0 ;;
+  "machine ssh")   exit 1 ;;   # no podman machine on a Linux host
+esac
+
+case "$1" in
+  pull)
+    echo "[fake] pulled $2"
+    ;;
+  ps)
+    printf 'ticketassistant_ollama_1\nticketassistant_ollama-pull_1\nticketassistant_api_1\n'
+    ;;
+  logs)
+    echo "[fake] --- qwen2.5:3b ready ---"
+    ;;
+  inspect)
+    case "$*" in
+      *State.ExitCode*)     echo "${FAKE_PULL_EXIT:-0}" ;;
+      *HostConfig.Devices*) echo "${FAKE_DEVICES:-/dev/nvidia-uvm /dev/nvidiactl /dev/nvidia0 }" ;;
+      *Config.Env*)         printf 'OLLAMA_HOST=0.0.0.0:11434\nOLLAMA_KEEP_ALIVE=%s\n' "${FAKE_KEEPALIVE:--1}" ;;
+    esac
+    ;;
+  exec)
+    printf 'NAME          ID              SIZE      PROCESSOR    CONTEXT    UNTIL\n'
+    printf 'qwen2.5:3b    357c53fb659c    2.2 GB    %s     4096       Forever\n' "${FAKE_PROCESSOR:-100% GPU}"
+    ;;
+esac
+exit 0
