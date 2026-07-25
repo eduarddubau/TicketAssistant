@@ -25,12 +25,25 @@ export class ApiService {
   private readonly sources = inject(SourcesService);
 
   async createConversation(): Promise<ConversationInfo> {
-    const res = await fetch(`${API_BASE}/api/conversations`, {
+    let res = await fetch(`${API_BASE}/api/conversations`, {
       method: 'POST',
       headers: { ...this.session.authHeader(), ...this.debug.headers() },
     });
-    const info: ConversationInfo = await res.json();
 
+    // A session the API doesn't know — it restarted, and they live in its memory — is now a 401
+    // rather than an anonymous request. Mint a fresh one and carry on: the alternative was the API
+    // treating the caller as nobody, which the mock reads as its admin view, so the assistant listed
+    // every user's tickets as if they were yours.
+    if (res.status === 401) {
+      this.debug.client('connection', 'session was not recognised — minting a new one', { status: 401 });
+      await this.session.ensure();
+      res = await fetch(`${API_BASE}/api/conversations`, {
+        method: 'POST',
+        headers: { ...this.session.authHeader(), ...this.debug.headers() },
+      });
+    }
+
+    const info: ConversationInfo = await res.json();
     this.debug.client('conversation', `new conversation ${info.conversationId}`, info);
     return info;
   }
@@ -65,6 +78,16 @@ export class ApiService {
     return this.stream(`${API_BASE}/api/conversations/${convId}/confirm`, payload, onEvent);
   }
 
+  /**
+   * Set when the API no longer knows this session or this conversation — both of which mean it
+   * restarted, since it keeps them in memory. The chat view answers by starting a fresh chat rather
+   * than showing a stack trace, which is the only honest thing to do with a transcript the server
+   * has already forgotten.
+   */
+  static isStale(error: unknown): boolean {
+    return error instanceof StaleServerError;
+  }
+
   private async stream(url: string, body: unknown, onEvent: (e: OrchestrationEvent) => void): Promise<void> {
     const headers = {
       'Content-Type': 'application/json',
@@ -87,6 +110,10 @@ export class ApiService {
       Math.round(performance.now() - startedAt),
     );
 
+    if (res.status === 401 || res.status === 404) {
+      // 401: this session predates the API's last restart. 404: so does this conversation.
+      throw new StaleServerError(res.status);
+    }
     if (!res.ok || !res.body) {
       throw new Error(`HTTP ${res.status} ${res.statusText}`);
     }
@@ -138,6 +165,13 @@ export class ApiService {
       { url, frames },
       Math.round(performance.now() - startedAt),
     );
+  }
+}
+
+/** Raised when the server has forgotten who we are, or what we were talking about. */
+class StaleServerError extends Error {
+  constructor(readonly status: number) {
+    super(status === 401 ? 'Your session expired.' : 'That conversation no longer exists.');
   }
 }
 

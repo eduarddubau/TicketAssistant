@@ -179,8 +179,13 @@ var ticketUrlTemplate = UsesBackend("Http") || UsesBackend("InMemory")
 // Start a new chat. Returns its id, the greeting it opened with (one of several, rotated per
 // chat), the mock link template, and whether Jira is enabled (so the SPA shows the connect UI
 // and gates chat behind it).
-app.MapPost("/api/conversations", (ConversationStore store) =>
+app.MapPost("/api/conversations", (ConversationStore store, CurrentSession current) =>
 {
+    // Identity is the point of a session here, so an unknown or expired one is a 401 rather than an
+    // anonymous chat: without a user the mock's reads used to fall back to its admin view, and the
+    // assistant would cheerfully list every user's tickets as if they were yours.
+    if (current.Get() is null) return Results.Unauthorized();
+
     var (conversationId, greeting) = store.Create();
     return Results.Ok(new { conversationId, greeting, boardUrl, ticketUrlTemplate, jiraEnabled });
 });
@@ -289,13 +294,19 @@ app.MapPost("/api/conversations/{id:guid}/messages", async (
     ChatRequest request,
     ConversationStore store,
     OrchestrationLoop loop,
+    CurrentSession current,
     HttpContext http,
     CancellationToken ct) =>
 {
-    var messages = store.Get(id);
+    if (current.Get() is null) return Results.Unauthorized();
+    // A conversation this process has never heard of (it restarted, most likely) is a 404, not an
+    // exception — the console's answer to both is to start a fresh one and resend.
+    if (!store.TryGet(id, out var messages)) return Results.NotFound();
+
     messages.Add(new ChatMessage(ChatRole.User, request.Text));
 
     await WriteSseAsync(http.Response, loop.RunAsync(messages, ct), ct);
+    return Results.Empty;
 });
 
 // Answer to a confirmation card: approve (optionally with edits) or decline the paused
@@ -305,16 +316,19 @@ app.MapPost("/api/conversations/{id:guid}/confirm", async (
     ConfirmRequest request,
     ConversationStore store,
     OrchestrationLoop loop,
+    CurrentSession current,
     HttpContext http,
     CancellationToken ct) =>
 {
-    var messages = store.Get(id);
+    if (current.Get() is null) return Results.Unauthorized();
+    if (!store.TryGet(id, out var messages)) return Results.NotFound();
 
     await WriteSseAsync(
         http.Response,
         loop.ResumeAfterConfirmationAsync(
             messages, request.CallId, request.Approved, request.Approved ? request.Edits : null, ct),
         ct);
+    return Results.Empty;
 });
 
 app.Run();

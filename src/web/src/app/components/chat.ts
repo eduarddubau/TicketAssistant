@@ -299,7 +299,15 @@ export class Chat implements OnInit, OnDestroy {
 
   private nextId = 1;
 
+  /**
+   * The conversation this view is talking to. Starts as the one handed in, but can be replaced
+   * without remounting: when the API restarts it forgets every conversation, and the recovery is to
+   * open a new one and carry on rather than throw the transcript away in front of the user.
+   */
+  private convId = '';
+
   ngOnInit(): void {
+    this.convId = this.conversation.conversationId;
     if (this.conversation.greeting) this.push('assistant', this.conversation.greeting);
   }
 
@@ -318,10 +326,10 @@ export class Chat implements OnInit, OnDestroy {
     if (!text || this.busy()) return;
 
     this.started.set(true);
-    this.debug.client('user_prompt', text, { text, conversationId: this.conversation.conversationId });
+    this.debug.client('user_prompt', text, { text, conversationId: this.convId });
     this.push('user', text, /*raw*/ true);
     this.draft.set('');
-    await this.run((onEvent) => this.api.sendMessage(this.conversation.conversationId, text, onEvent));
+    await this.run((onEvent) => this.api.sendMessage(this.convId, text, onEvent), /*canResend*/ true);
   }
 
   // Projects offered on the create card — across every active backend.
@@ -334,10 +342,14 @@ export class Chat implements OnInit, OnDestroy {
       ? { callId: d.callId, approved: true, edits: d.edits }
       : { callId: d.callId, approved: false };
     this.debug.client('decision', d.approved ? 'user approved the card' : 'user declined the card', payload);
-    await this.run((onEvent) => this.api.confirm(this.conversation.conversationId, payload, onEvent));
+    // No resend for a decision: the call it answers belongs to the conversation that just vanished.
+    await this.run((onEvent) => this.api.confirm(this.convId, payload, onEvent));
   }
 
-  private async run(call: (onEvent: (e: OrchestrationEvent) => void) => Promise<void>): Promise<void> {
+  private async run(
+    call: (onEvent: (e: OrchestrationEvent) => void) => Promise<void>,
+    canResend = false,
+  ): Promise<void> {
     this.busy.set(true);
     this.startThinking();
     try {
@@ -345,7 +357,22 @@ export class Chat implements OnInit, OnDestroy {
     } catch (e: any) {
       this.finalizeStreaming();
       this.debug.client('error', e?.message ?? String(e), { error: String(e) });
-      this.push('error', e?.message ?? String(e), true);
+
+      // The API forgot us (it restarted, and it keeps sessions and conversations in memory): take a
+      // fresh session and conversation, then send the message once more. Anything else is a real
+      // error and belongs on screen.
+      if (ApiService.isStale(e) && canResend) {
+        this.push('error', 'The assistant restarted, so this chat begins again — resending your message.', true);
+        try {
+          this.convId = (await this.api.createConversation()).conversationId;
+          await call((ev) => this.handleEvent(ev));
+          return;
+        } catch (retry: any) {
+          this.push('error', retry?.message ?? String(retry), true);
+        }
+      } else {
+        this.push('error', e?.message ?? String(e), true);
+      }
     } finally {
       this.finalizeStreaming();
       this.stopThinking();

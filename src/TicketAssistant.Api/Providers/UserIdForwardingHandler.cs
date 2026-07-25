@@ -14,13 +14,19 @@ public sealed class UserIdForwardingHandler(CurrentSession current) : Delegating
 {
     public const string UserHeader = "X-User-Id";
 
+    /// <summary>
+    /// Sent when there is no session to name. The mock reads a *missing* user header as the board's
+    /// admin view — every user's tickets — which is the one thing a request without an identity must
+    /// never get. This owns nothing, so an unauthenticated read comes back empty instead.
+    /// </summary>
+    private const string NoOne = "__no-session__";
+
     protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
-        if (current.Get()?.UserKey is { Length: > 0 } userKey)
-        {
-            request.Headers.Remove(UserHeader);
-            request.Headers.Add(UserHeader, userKey);
-        }
+        var userKey = current.Get()?.UserKey is { Length: > 0 } key ? key : NoOne;
+
+        request.Headers.Remove(UserHeader);
+        request.Headers.Add(UserHeader, userKey);
 
         return base.SendAsync(request, cancellationToken);
     }

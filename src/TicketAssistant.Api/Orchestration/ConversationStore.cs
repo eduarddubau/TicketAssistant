@@ -226,6 +226,13 @@ public sealed class ConversationStore
     }
 
     /// <summary>
+    /// The live message list for a conversation, or false when the id is unknown — which is the
+    /// normal state of every id this process minted before it restarted, not an exceptional one.
+    /// </summary>
+    public bool TryGet(Guid conversationId, out List<ChatMessage> messages) =>
+        _conversations.TryGetValue(conversationId, out messages!);
+
+    /// <summary>
     /// Returns the live message list for a conversation so the caller can append to it and
     /// pass it to the loop. Throws if the id is unknown (e.g. after an app restart).
     /// </summary>
