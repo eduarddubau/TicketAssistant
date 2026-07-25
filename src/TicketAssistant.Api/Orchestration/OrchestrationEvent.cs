@@ -1,3 +1,5 @@
+using System.Text.Json.Nodes;
+
 namespace TicketAssistant.Api.Orchestration;
 
 /// <summary>
@@ -48,4 +50,23 @@ public abstract record OrchestrationEvent
         string CallId,
         string ToolName,
         IDictionary<string, object?> Arguments) : OrchestrationEvent;
+
+    /// <summary>
+    /// A look inside the loop, for the console's debug console: what was sent to the model,
+    /// what came back, which tool ran with which arguments, which guardrail fired. Carried on
+    /// the same stream as everything else but never shown in the transcript — the UI routes
+    /// these to the debug panel instead.
+    ///
+    /// Only produced when the caller asks for it (see <see cref="DebugTrace"/>), so a normal
+    /// chat pays nothing for it.
+    /// </summary>
+    /// <param name="Stage">Which part of the turn this is (llm_request, tool_result, …) — the UI groups and filters on it.</param>
+    /// <param name="Label">A one-line headline, readable without expanding the entry.</param>
+    /// <param name="Detail">The full structured payload behind that headline.</param>
+    /// <param name="ElapsedMs">How long the step took, when it's something that takes time.</param>
+    public sealed record Debug(
+        string Stage,
+        string Label,
+        JsonNode? Detail,
+        long? ElapsedMs = null) : OrchestrationEvent;
 }

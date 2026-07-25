@@ -94,7 +94,7 @@ container when the LLM runs locally:
 | --- | --- |
 | [`src/TicketAssistant.Api`](src/TicketAssistant.Api) | The assistant: chat endpoints, the tool-calling loop, the ticket-provider abstraction, and auth (bearer sessions + Jira OAuth). |
 | [`src/TicketingMock.Api`](src/TicketingMock.Api) | A stand-in "external ticketing system" — in-memory store, REST API, and a live board UI, so you can watch tickets land in a separate app. |
-| [`src/web`](src/web) | The Angular console: streaming chat, editable confirmation cards, and the switchers. |
+| [`src/web`](src/web) | The Angular console: streaming chat, editable confirmation cards, the switchers, and the debug console. |
 
 ### What it demonstrates
 
@@ -120,6 +120,9 @@ container when the LLM runs locally:
   an empty box.
 - **Per-user scoping**, and a **local GPU/CPU choice** for Ollama that's auto-detected at startup and
   switchable live from the console.
+- **A trace you can read.** A togglable [debug console](#the-debug-console) streams the whole turn —
+  system prompt, exact context, raw reply, every tool call and guardrail — beside the chat, so none
+  of the above has to be taken on faith. Opt-in per request, so it costs nothing when it's closed.
 
 <details>
 <summary><b>Inside <code>TicketAssistant.Api</code></b></summary>
@@ -136,7 +139,10 @@ container when the LLM runs locally:
   - `ConversationStore.cs` — per-chat history, the system prompt, and the rotating openers.
   - `UndoStore.cs` — remembers, per user, how to reverse the last write.
   - `OrchestrationEvent.cs` — the events streamed to the browser (assistant text/deltas, tool ran,
-    confirmation required, replace-streamed-text).
+    confirmation required, replace-streamed-text, and the debug trace).
+  - `DebugTrace.cs` / `DebugEvents.cs` — the opt-in trace behind the console's debug panel: whether
+    this request asked for it (`X-Debug`), and the snapshots it streams (prompt, context, raw reply,
+    tool arguments and results, guardrails).
 - **`Providers/`** — `ITicketProvider` and its implementations: `HttpTicketProvider` (the mock over
   REST), `JiraTicketProvider` (real Jira Cloud via per-user OAuth), `InMemoryTicketProvider` (offline
   stub), `CompositeTicketProvider` (several backends at once — reads fan out and merge, writes route
@@ -160,7 +166,40 @@ Every switcher in the header takes effect on the next message — no restart:
 | **Compute** | Ollama only: *GPU* (used when the container has one) or *CPU* (forced). |
 | *status badge* | Where the loaded model is **actually** running, straight from Ollama's own report: `GPU`, `CPU`, a split when the model doesn't fully fit in VRAM, or idle — and `GPU off` when the machine has an NVIDIA GPU the container isn't using. |
 | **User** | Who you are; the mock scopes tickets to this user. Defaults to `alice`, who owns the seed tickets — change it to test isolation. |
+| **Debug** | Opens the debug console (below). Also `Ctrl` + `` ` ``. |
 | **Connect Jira** | Logs *you* into *your own* Jira through an OAuth popup (shown only when the Jira backend is enabled). |
+
+### The debug console
+
+An assistant that decides things on your behalf is only trustworthy if you can check its work, so
+the console can show you the whole turn as it happens — docked beside the chat, not instead of it.
+
+<p align="center">
+  <img src="docs/debug-console.png" width="900"
+       alt="The console with the debug panel open on the right: a timeline of the turn — system prompt, user prompt, HTTP request, the call to the model, its reply, a list_tickets tool call and result, and the streamed answer — each row with a timestamp and duration.">
+</p>
+
+One row per step, in order, from both ends of the wire — `web` rows are what the browser sent and
+received, `api` rows are what the loop did:
+
+- **the system prompt**, in full, the moment you open the panel;
+- **every user prompt**, and the exact HTTP request it became;
+- **the whole context sent to the model** on each turn — every message, including tool calls and
+  their results — plus the tool menu with the JSON schema of each tool, and the provider/model used;
+- **the model's raw reply**: text, tool calls with arguments, finish reason, token usage, how many
+  fragments it streamed, and how long it took;
+- **every tool call and its result**, verbatim, with timings;
+- **every guardrail that fired** — a blocked create, a duplicate match, a bounced replay, a
+  malformed tool call — and what the model was told instead;
+- **each confirmation**: what was proposed, what you edited, what finally ran, and what "undo that"
+  would now reverse.
+
+Click a row to expand it; conversation snapshots get a readable view and the untouched JSON sits
+underneath. Filter by text, mute stages you don't care about, drag the edge to widen it, and copy or
+save the whole trace as JSON to attach to a bug report.
+
+The switch is the feature: with the panel closed the browser doesn't ask for a trace, and the API
+builds none — nothing extra is computed or sent.
 
 ## Configuration
 

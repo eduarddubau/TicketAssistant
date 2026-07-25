@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.AI;
 using TicketAssistant.Api.Models;
@@ -23,12 +24,15 @@ namespace TicketAssistant.Api.Orchestration;
 /// <param name="provider">The ticket backend, used directly for the duplicate-detection lookup.</param>
 /// <param name="logger">Traces what the model asked for and which guardrails fired — the main
 /// way to see why a turn behaved the way it did without reproducing it live.</param>
+/// <param name="debug">Whether this request also wants that trace streamed to the browser, for
+/// the console's debug console. When it's off, no snapshot is built at all.</param>
 public sealed class OrchestrationLoop(
     ChatClientFactory chatClients,
     IReadOnlyList<AIFunction> tools,
     ITicketProvider provider,
     UndoStore undo,
-    ILogger<OrchestrationLoop> logger)
+    ILogger<OrchestrationLoop> logger,
+    DebugTrace debug)
 {
     // Same tools, indexed by name so we can look up the one the model asked for in O(1).
     private readonly Dictionary<string, AIFunction> _toolsByName = tools.ToDictionary(t => t.Name);
@@ -91,18 +95,71 @@ public sealed class OrchestrationLoop(
                 call.Name,
                 edits is { Count: > 0 } ? $" with edits to: {string.Join(", ", edits.Keys)}" : " unchanged");
 
+            if (debug.Enabled)
+            {
+                yield return DebugEvents.Confirmation(
+                    $"✔ user approved {call.Name}",
+                    new JsonObject
+                    {
+                        ["callId"] = callId,
+                        ["tool"] = call.Name,
+                        ["approved"] = true,
+                        ["edits"] = DebugEvents.Value(edits),
+                        ["finalArguments"] = DebugEvents.Value(arguments)
+                    });
+                yield return DebugEvents.ToolCall(call.Name, call, requiresConfirmation: true);
+            }
+
             // Snapshot the ticket before we change it, so "undo that" can restore the old value.
             var ticketId = ArgString(arguments, "ticketId");
             var before = ticketId is null ? null : await TryGetTicketAsync(ticketId, ct);
 
+            var writeStopwatch = Stopwatch.StartNew();
             result = await InvokeToolAsync(_toolsByName[call.Name], call, ct);
+            writeStopwatch.Stop();
 
+            if (debug.Enabled)
+            {
+                yield return DebugEvents.ToolResult(
+                    call.Name, callId, result,
+                    succeeded: result is not string s || !s.StartsWith("Error:", StringComparison.Ordinal),
+                    writeStopwatch.ElapsedMilliseconds);
+            }
+
+            var undoBefore = undo.Peek();
             RecordUndo(call.Name, before, result);
+            if (debug.Enabled)
+            {
+                var undoAfter = undo.Peek();
+                yield return DebugEvents.Undo(
+                    undoAfter is null ? "nothing recorded to undo" : $"recorded: {undoAfter.Description}",
+                    new JsonObject
+                    {
+                        ["tool"] = call.Name,
+                        ["previousUndo"] = undoBefore?.Description,
+                        ["currentUndo"] = undoAfter?.Description,
+                        ["ticketBefore"] = DebugEvents.Value(before)
+                    });
+            }
         }
         else
         {
             logger.LogInformation("User declined {Tool}", call.Name);
             result = DeclineResult(call.Name);
+
+            if (debug.Enabled)
+            {
+                yield return DebugEvents.Confirmation(
+                    $"✖ user declined {call.Name}",
+                    new JsonObject
+                    {
+                        ["callId"] = callId,
+                        ["tool"] = call.Name,
+                        ["approved"] = false,
+                        ["proposedArguments"] = DebugEvents.Value(call.Arguments),
+                        ["toolResultGivenToModel"] = result?.ToString()
+                    });
+            }
         }
 
         messages.Add(new ChatMessage(ChatRole.Tool, [new FunctionResultContent(callId, result)]));
@@ -159,9 +216,25 @@ public sealed class OrchestrationLoop(
             if (turn >= maxTurns)
             {
                 logger.LogWarning("Giving up after {MaxTurns} turns — the model kept calling tools without finishing", maxTurns);
+                if (debug.Enabled)
+                {
+                    yield return DebugEvents.Guardrail(
+                        $"gave up after {maxTurns} turns — the model kept calling tools without finishing",
+                        new JsonObject { ["maxTurns"] = maxTurns });
+                }
+
                 yield return new OrchestrationEvent.AssistantText(
                     "I wasn't able to complete that. Could you rephrase or give me a bit more detail?");
                 yield break;
+            }
+
+            // The trace's first entry for this turn: the exact context the model is about to
+            // see — system prompt, every message so far, and the tool menu with its schemas.
+            if (debug.Enabled)
+            {
+                var (traceProvider, traceModel) = chatClients.Current();
+                yield return DebugEvents.LlmRequest(
+                    turn, traceProvider, traceModel, chatClients.CpuOnlyRequested(), messages, tools, options);
             }
 
             // 1. Ask the model what to do next, given the whole conversation so far. Streaming
@@ -202,6 +275,13 @@ public sealed class OrchestrationLoop(
 
                 if (failed)
                 {
+                    if (debug.Enabled)
+                    {
+                        yield return DebugEvents.Guardrail(
+                            "the language model request failed — see the server log for the exception",
+                            new JsonObject { ["turn"] = turn + 1 });
+                    }
+
                     // yield can't live inside a catch, so we surface the error out here.
                     yield return new OrchestrationEvent.AssistantText(
                         "Ah, sorry — I can't reach the language model at the moment (it may be busy or " +
@@ -252,6 +332,11 @@ public sealed class OrchestrationLoop(
                 "Turn {Turn}: model replied in {ElapsedMs}ms with {ToolCallCount} tool call(s) [{Tools}]",
                 turn, stopwatch.ElapsedMilliseconds, calls.Count, string.Join(", ", calls.Select(c => c.Name)));
 
+            if (debug.Enabled)
+            {
+                yield return DebugEvents.LlmResponse(turn, response, updates, calls, stopwatch.ElapsedMilliseconds);
+            }
+
             // A short genuine reply may have ended before reaching the streaming threshold — flush it.
             if (!streaming && !streamedText && calls.Count == 0 && buffer.Length > 0
                 && !LooksLikeToolCallText(response.Text))
@@ -272,6 +357,19 @@ public sealed class OrchestrationLoop(
                 botchedAttempts++;
                 logger.LogWarning("Model wrote a malformed tool call as text (attempt {Attempt}, embedded: {Embedded}): {Preview}",
                     botchedAttempts, blobEmbeddedInStreamedText, Truncate(response.Text, 120));
+
+                if (debug.Enabled)
+                {
+                    yield return DebugEvents.Guardrail(
+                        $"the model wrote a tool call as text instead of calling it (attempt {botchedAttempts} of {maxBotchedAttempts})",
+                        new JsonObject
+                        {
+                            ["attempt"] = botchedAttempts,
+                            ["maxAttempts"] = maxBotchedAttempts,
+                            ["embeddedInStreamedProse"] = blobEmbeddedInStreamedText,
+                            ["replyText"] = response.Text
+                        });
+                }
 
                 if (botchedAttempts >= maxBotchedAttempts)
                 {
@@ -313,6 +411,13 @@ public sealed class OrchestrationLoop(
             {
                 emptyReplies++;
                 logger.LogWarning("Model returned an empty reply (attempt {Attempt})", emptyReplies);
+
+                if (debug.Enabled)
+                {
+                    yield return DebugEvents.Guardrail(
+                        $"the model replied with nothing at all (attempt {emptyReplies} of {maxEmptyReplies})",
+                        new JsonObject { ["attempt"] = emptyReplies, ["maxAttempts"] = maxEmptyReplies });
+                }
 
                 if (emptyReplies < maxEmptyReplies)
                 {
@@ -360,6 +465,11 @@ public sealed class OrchestrationLoop(
                 {
                     var arguments = call.Arguments ?? new Dictionary<string, object?>();
 
+                    if (debug.Enabled)
+                    {
+                        yield return DebugEvents.ToolCall(call.Name, call, requiresConfirmation: true);
+                    }
+
                     // Only one confirmation dialog at a time — tell the model to re-request
                     // any further writes once this one is resolved.
                     if (pendingConfirmation is not null)
@@ -367,6 +477,19 @@ public sealed class OrchestrationLoop(
                         logger.LogInformation(
                             "Deferred {Tool}: {PendingTool} is already awaiting confirmation",
                             call.Name, pendingConfirmation.Name);
+
+                        if (debug.Enabled)
+                        {
+                            yield return DebugEvents.Guardrail(
+                                $"deferred {call.Name} — {pendingConfirmation.Name} is already awaiting confirmation",
+                                new JsonObject
+                                {
+                                    ["tool"] = call.Name,
+                                    ["callId"] = call.CallId,
+                                    ["alreadyPending"] = pendingConfirmation.Name
+                                });
+                        }
+
                         messages.Add(new ChatMessage(ChatRole.Tool, [new FunctionResultContent(
                             call.CallId,
                             $"Not executed — '{pendingConfirmation.Name}' is already waiting for the user's " +
@@ -394,6 +517,22 @@ public sealed class OrchestrationLoop(
                                 logger.LogInformation(
                                     "Nudged create_ticket: replay of declined ticket \"{Title}\"; latest user message: \"{UserText}\"",
                                     declinedTitle, Truncate(latestUserText, 80));
+
+                                if (debug.Enabled)
+                                {
+                                    yield return DebugEvents.Guardrail(
+                                        $"bounced create_ticket — it replays the ticket the user just declined (\"{declinedTitle}\")",
+                                        new JsonObject
+                                        {
+                                            ["tool"] = call.Name,
+                                            ["callId"] = call.CallId,
+                                            ["declinedTitle"] = declinedTitle,
+                                            ["declinedDescription"] = declinedDescription,
+                                            ["latestUserMessage"] = latestUserText,
+                                            ["proposedArguments"] = DebugEvents.Value(arguments)
+                                        });
+                                }
+
                                 messages.Add(new ChatMessage(ChatRole.Tool, [new FunctionResultContent(
                                     call.CallId,
                                     $"Not executed — this is the same ticket (\"{declinedTitle}\") the user just " +
@@ -410,6 +549,20 @@ public sealed class OrchestrationLoop(
                         if (missing.Count > 0)
                         {
                             logger.LogInformation("Blocked create_ticket: missing {MissingFields}", string.Join(", ", missing));
+
+                            if (debug.Enabled)
+                            {
+                                yield return DebugEvents.Guardrail(
+                                    $"blocked create_ticket — still missing {string.Join(", ", missing)}",
+                                    new JsonObject
+                                    {
+                                        ["tool"] = call.Name,
+                                        ["callId"] = call.CallId,
+                                        ["missingFields"] = DebugEvents.Value(missing),
+                                        ["proposedArguments"] = DebugEvents.Value(arguments)
+                                    });
+                            }
+
                             messages.Add(new ChatMessage(ChatRole.Tool, [new FunctionResultContent(
                                 call.CallId,
                                 $"Ticket not created — required fields still missing: {string.Join("; ", missing)}. " +
@@ -429,6 +582,19 @@ public sealed class OrchestrationLoop(
                                 arguments["relatedTo"] = related.Select(t => t.Id).ToArray();
                                 logger.LogInformation(
                                     "Linking new ticket to existing {Related}", string.Join(", ", related.Select(t => t.Id)));
+
+                                if (debug.Enabled)
+                                {
+                                    yield return DebugEvents.Guardrail(
+                                        $"createAnyway was set — linking the new ticket to {string.Join(", ", related.Select(t => t.Id))}",
+                                        new JsonObject
+                                        {
+                                            ["tool"] = call.Name,
+                                            ["callId"] = call.CallId,
+                                            ["relatedTo"] = DebugEvents.Value(related.Select(t => t.Id).ToArray()),
+                                            ["matches"] = DebugEvents.Value(related)
+                                        });
+                                }
                             }
                         }
                         else
@@ -440,6 +606,19 @@ public sealed class OrchestrationLoop(
                                 logger.LogInformation(
                                     "Blocked create_ticket: {DuplicateCount} possible duplicate(s) of \"{Title}\": {Duplicates}",
                                     duplicates.Count, ArgString(arguments, "title"), list);
+
+                                if (debug.Enabled)
+                                {
+                                    yield return DebugEvents.Guardrail(
+                                        $"blocked create_ticket — {duplicates.Count} possible duplicate(s) of \"{ArgString(arguments, "title")}\"",
+                                        new JsonObject
+                                        {
+                                            ["tool"] = call.Name,
+                                            ["callId"] = call.CallId,
+                                            ["proposedTitle"] = ArgString(arguments, "title"),
+                                            ["duplicates"] = DebugEvents.Value(duplicates)
+                                        });
+                                }
                                 messages.Add(new ChatMessage(ChatRole.Tool, [new FunctionResultContent(
                                     call.CallId,
                                     $"This user already has a ticket for what looks like the same issue: {list}. " +
@@ -464,21 +643,48 @@ public sealed class OrchestrationLoop(
                 if (!_toolsByName.TryGetValue(call.Name, out var tool))
                 {
                     logger.LogWarning("Model requested unknown tool {Tool}", call.Name);
+                    if (debug.Enabled)
+                    {
+                        yield return DebugEvents.Guardrail(
+                            $"the model asked for a tool that doesn't exist: {call.Name}",
+                            new JsonObject
+                            {
+                                ["tool"] = call.Name,
+                                ["callId"] = call.CallId,
+                                ["arguments"] = DebugEvents.Value(call.Arguments),
+                                ["knownTools"] = DebugEvents.Value(_toolsByName.Keys)
+                            });
+                    }
+
                     messages.Add(new ChatMessage(ChatRole.Tool,
                         [new FunctionResultContent(call.CallId, $"Unknown tool '{call.Name}'.")]));
                     yield return new OrchestrationEvent.ToolExecuted(call.Name, Succeeded: false);
                     continue;
                 }
 
+                if (debug.Enabled)
+                {
+                    yield return DebugEvents.ToolCall(call.Name, call, requiresConfirmation: false);
+                }
+
                 // Run it, feed the result back into the conversation, and tell the UI it ran.
                 // The loop then goes around again so the model can use that result.
+                var toolStopwatch = Stopwatch.StartNew();
                 var result = await InvokeToolAsync(tool, call, ct);
+                toolStopwatch.Stop();
                 var failed = result is string s && s.StartsWith("Error:", StringComparison.Ordinal);
                 logger.LogInformation("Ran {Tool} (succeeded: {Succeeded})", call.Name, !failed);
                 if (failed)
                 {
                     logger.LogWarning("Tool {Tool} returned an error: {Error}", call.Name, result);
                 }
+
+                if (debug.Enabled)
+                {
+                    yield return DebugEvents.ToolResult(
+                        call.Name, call.CallId, result, !failed, toolStopwatch.ElapsedMilliseconds);
+                }
+
                 messages.Add(new ChatMessage(ChatRole.Tool, [new FunctionResultContent(call.CallId, result)]));
                 yield return new OrchestrationEvent.ToolExecuted(call.Name, Succeeded: !failed);
             }
@@ -488,6 +694,18 @@ public sealed class OrchestrationLoop(
             if (pendingConfirmation is not null)
             {
                 logger.LogInformation("Awaiting user confirmation for {Tool}", pendingConfirmation.Name);
+                if (debug.Enabled)
+                {
+                    yield return DebugEvents.Confirmation(
+                        $"⏸ paused — waiting for the user to approve {pendingConfirmation.Name}",
+                        new JsonObject
+                        {
+                            ["tool"] = pendingConfirmation.Name,
+                            ["callId"] = pendingConfirmation.CallId,
+                            ["arguments"] = DebugEvents.Value(pendingArguments)
+                        });
+                }
+
                 yield return new OrchestrationEvent.ConfirmationRequired(
                     pendingConfirmation.CallId, pendingConfirmation.Name, pendingArguments!);
                 yield break;

@@ -36,6 +36,12 @@ public sealed class UndoStore(IHttpContextAccessor accessor)
     /// </summary>
     public UndoAction? Take() => _lastAction.TryRemove(UserKey, out var action) ? action : null;
 
+    /// <summary>
+    /// The pending undo for this user without consuming it, or null if there is none. Read-only
+    /// by design — it exists so the debug trace can report what is currently undoable.
+    /// </summary>
+    public UndoAction? Peek() => _lastAction.TryGetValue(UserKey, out var action) ? action : null;
+
     /// <summary>Drops any pending undo, e.g. once it is no longer safe to reverse.</summary>
     public void Clear() => _lastAction.TryRemove(UserKey, out _);
 }

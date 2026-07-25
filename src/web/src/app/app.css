@@ -103,6 +103,9 @@ app-toolbar { margin-left: auto; min-width: 0; }
 }
 
 .stage { flex: 1; min-height: 0; display: flex; }
+/* The chat keeps whatever the debug console doesn't take, and can be squeezed rather than
+   pushing the panel off-screen. */
+.conversation { flex: 1; min-width: 0; min-height: 0; display: flex; }
 app-chat { flex: 1; min-height: 0; display: flex; }
 
 .loading { flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; }

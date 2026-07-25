@@ -3,6 +3,7 @@ import { LlmService } from '../services/llm.service';
 import { SessionService } from '../services/session.service';
 import { JiraService } from '../services/jira.service';
 import { ProjectsService } from '../services/projects.service';
+import { DebugService } from '../services/debug.service';
 
 /**
  * The config strip: who you are (scopes the mock), which LLM/model to use, GPU vs CPU for Ollama
@@ -52,6 +53,17 @@ import { ProjectsService } from '../services/projects.service';
       }
 
       <span class="sep"></span>
+
+      <!-- Opens the debug console. Also what makes the API stream its trace at all, so it reads
+           as a switch rather than a view: off means nothing extra is computed or sent. -->
+      <button class="ghost dbg" [class.on]="debug.enabled()" (click)="debug.toggle()"
+              [title]="debug.enabled() ? 'Hide the debug console (Ctrl+\`)' : 'Show what the assistant is doing under the hood (Ctrl+\`)'">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+             stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="m8 8-4 4 4 4"/><path d="m16 8 4 4-4 4"/>
+        </svg>
+        Debug
+      </button>
 
       <div class="ctl">
         <span class="lbl">User</span>
@@ -160,6 +172,14 @@ import { ProjectsService } from '../services/projects.service';
     }
     .ghost:hover { background: var(--surface-2); color: var(--text); border-color: var(--border-strong); }
 
+    .ghost.dbg { gap: 0.4rem; font-weight: 600; }
+    /* Lit while it's on: this one has a running cost (the API traces every turn), so it shouldn't
+       be possible to leave it enabled without noticing. */
+    .ghost.dbg.on {
+      background: rgba(124, 108, 255, 0.16); border-color: rgba(150, 120, 255, 0.6); color: #ded8ff;
+      box-shadow: inset 0 0 0 1px rgba(124, 108, 255, 0.15);
+    }
+
     .jira-pill {
       display: flex; align-items: center; gap: 0.4rem;
       font-size: 0.75rem; color: #cfeadd; line-height: 1;
@@ -179,6 +199,7 @@ export class Toolbar {
   readonly llm = inject(LlmService);
   readonly session = inject(SessionService);
   readonly jira = inject(JiraService);
+  readonly debug = inject(DebugService);
   private readonly projects = inject(ProjectsService);
 
   readonly connecting = signal(false);

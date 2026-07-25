@@ -1,6 +1,7 @@
 import { Component, Input, OnDestroy, OnInit, inject, signal } from '@angular/core';
 import { ApiService } from '../services/api.service';
 import { ProjectsService } from '../services/projects.service';
+import { DebugService } from '../services/debug.service';
 import { ConversationInfo, JiraProject, OrchestrationEvent } from '../models';
 import { renderMarkdown } from '../markdown';
 import { ConfirmationCard, Decision } from './confirmation-card';
@@ -251,6 +252,7 @@ export class Chat implements OnInit, OnDestroy {
 
   private readonly api = inject(ApiService);
   private readonly projectsSvc = inject(ProjectsService);
+  private readonly debug = inject(DebugService);
 
   readonly log = signal<LogItem[]>([]);
   readonly streaming = signal<string | null>(null);
@@ -287,6 +289,7 @@ export class Chat implements OnInit, OnDestroy {
     if (!text || this.busy()) return;
 
     this.started.set(true);
+    this.debug.client('user_prompt', text, { text, conversationId: this.conversation.conversationId });
     this.push('user', text, /*raw*/ true);
     this.draft.set('');
     await this.run((onEvent) => this.api.sendMessage(this.conversation.conversationId, text, onEvent));
@@ -301,6 +304,7 @@ export class Chat implements OnInit, OnDestroy {
     const payload = d.approved
       ? { callId: d.callId, approved: true, edits: d.edits }
       : { callId: d.callId, approved: false };
+    this.debug.client('decision', d.approved ? 'user approved the card' : 'user declined the card', payload);
     await this.run((onEvent) => this.api.confirm(this.conversation.conversationId, payload, onEvent));
   }
 
@@ -311,6 +315,7 @@ export class Chat implements OnInit, OnDestroy {
       await call((e) => this.handleEvent(e));
     } catch (e: any) {
       this.finalizeStreaming();
+      this.debug.client('error', e?.message ?? String(e), { error: String(e) });
       this.push('error', e?.message ?? String(e), true);
     } finally {
       this.finalizeStreaming();

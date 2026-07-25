@@ -30,11 +30,19 @@
 }
 
 <main class="stage">
-  @if (conversation(); as conv) {
-    <app-chat [conversation]="conv" />
-  } @else {
-    <div class="loading">
-      <span class="l-dot"></span><span class="l-dot"></span><span class="l-dot"></span>
-    </div>
+  <div class="conversation">
+    @if (conversation(); as conv) {
+      <app-chat [conversation]="conv" />
+    } @else {
+      <div class="loading">
+        <span class="l-dot"></span><span class="l-dot"></span><span class="l-dot"></span>
+      </div>
+    }
+  </div>
+
+  <!-- Docked beside the chat rather than over it: the whole point is to watch the trace and the
+       conversation at the same time. -->
+  @if (debug.enabled()) {
+    <app-debug-console (closed)="debug.setEnabled(false)" />
   }
 </main>

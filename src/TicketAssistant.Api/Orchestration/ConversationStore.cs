@@ -18,8 +18,11 @@ public sealed class ConversationStore
     /// English: how it should sound, gather required fields, ask when something's missing,
     /// avoid duplicates, and never fabricate results. Changing this text changes how the
     /// assistant behaves.
+    ///
+    /// Public so the console's debug console can show it verbatim from the moment a chat
+    /// starts, rather than only once the first model call carries it.
     /// </summary>
-    private const string SystemPrompt =
+    public const string SystemPrompt =
         """
         You are a support-ticket assistant. You can look up, search, create, update, and
         comment on tickets using the provided tools.

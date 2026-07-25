@@ -112,6 +112,10 @@ builder.Services.AddSingleton(sp =>
 builder.Services.AddSingleton<OrchestrationLoop>();
 builder.Services.AddSingleton<ConversationStore>();
 
+// Reads the X-Debug header, so the loop knows whether to also stream its inner workings to the
+// console's debug console. Off unless a request asks for it.
+builder.Services.AddSingleton<DebugTrace>();
+
 var app = builder.Build();
 
 // ----- HTTP pipeline -----
@@ -168,6 +172,13 @@ app.MapPost("/api/conversations", (ConversationStore store) =>
     var (conversationId, greeting) = store.Create();
     return Results.Ok(new { conversationId, greeting, boardUrl, ticketUrlTemplate, jiraEnabled });
 });
+
+// The assistant's standing instructions, verbatim. Only answered for a caller that asked for the
+// debug trace (X-Debug): it's what the console's debug console shows the moment it's opened,
+// instead of waiting for the next turn to carry the system prompt along with everything else.
+app.MapGet("/api/system-prompt", (DebugTrace debug) => debug.Enabled
+    ? Results.Ok(new { systemPrompt = ConversationStore.SystemPrompt })
+    : Results.NotFound());
 
 // Which LLM providers exist, which one this request would use, and which are actually
 // usable (Ollama always; hosted providers only when their API key is configured) — the
@@ -351,6 +362,17 @@ static async Task WriteSseAsync(
                 callId = e.CallId,
                 toolName = e.ToolName,
                 arguments = e.Arguments
+            },
+            // Only present when the caller set X-Debug; the console routes these to its debug
+            // panel instead of the transcript.
+            OrchestrationEvent.Debug e => new
+            {
+                type = "debug",
+                stage = e.Stage,
+                label = e.Label,
+                detail = e.Detail,
+                elapsedMs = e.ElapsedMs,
+                at = DateTimeOffset.UtcNow
             },
             _ => throw new InvalidOperationException($"Unhandled event type '{evt.GetType().Name}'.")
         };
