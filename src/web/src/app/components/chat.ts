@@ -31,7 +31,7 @@ type LogItem =
               <div class="row {{ item.role }}">
                 @if (item.role === 'assistant') { <div class="avatar"></div> }
                 <div class="bubble-wrap">
-                  @if (item.role === 'assistant') { <span class="ring"><i></i></span> }
+                  @if (item.role === 'assistant') { <span class="ring"><i></i><b></b></span> }
                   <div class="bubble {{ item.role }}" [innerHTML]="item.html"></div>
                 </div>
               </div>
@@ -48,7 +48,7 @@ type LogItem =
           <div class="row assistant">
             <div class="avatar"></div>
             <div class="bubble-wrap">
-              <span class="inner"><i></i></span><span class="ring hot"><i></i></span>
+              <span class="inner"><b></b></span><span class="ring hot"><i></i><b></b></span>
               <div class="bubble assistant streaming">{{ streaming() }}</div>
             </div>
           </div>
@@ -57,7 +57,7 @@ type LogItem =
           <div class="row assistant">
             <div class="avatar"></div>
             <div class="bubble-wrap">
-              <span class="inner"><i></i></span><span class="ring hot"><i></i></span>
+              <span class="inner"><b></b></span><span class="ring hot"><i></i><b></b></span>
               <div class="bubble assistant thinking">
                 <span class="tdot"></span><span class="tdot"></span><span class="tdot"></span>
               </div>
@@ -120,9 +120,16 @@ type LogItem =
        shape independently of its content. */
     .bubble-wrap { position: relative; max-width: 86%; min-width: 0; }
 
-    /* Light travelling around the bubble wall: a conic gradient spinning inside a box clipped to
-       the bubble's rounded rectangle and masked to a thin band, so only the border lights up.
-       Every assistant message keeps a calm version of it; the one being generated turns it up. */
+    /* The bubble wall is lit in two layers, inside a box clipped to the bubble's rounded rectangle
+       and masked to a thin band so only the border shows: a still conic gradient underneath, and a
+       point of light travelling around the perimeter on top. Every assistant message has both; the
+       one being generated runs faster and brighter.
+
+       The travelling part is a *small* element moved along a motion path, which is the whole trick:
+       the frame cost is one 120px layer's transform, the same whether the bubble is three lines or
+       thirty. The two things it replaces both scaled with the bubble — a rotating square had to be
+       2.5x its larger side (12 megapixels for a normal reply, ~48 MB of GPU layer), and an animated
+       gradient angle repaints the entire bubble every frame. */
     .ring {
       position: absolute; inset: 0; z-index: 2; pointer-events: none;
       border-radius: 18px; overflow: hidden; padding: 1.5px;
@@ -131,32 +138,46 @@ type LogItem =
       -webkit-mask-composite: xor; mask-composite: exclude;
       opacity: 0.8; transition: opacity 0.5s var(--ease);
     }
-    /* Fills the bubble exactly, whatever shape it is — no oversized layer to rasterize. */
+    /* The still layer: fills the bubble exactly, whatever shape it is. Painted once. */
     .ring i {
-      position: absolute; inset: 0; --sweep: 0deg;
-      background: conic-gradient(from var(--sweep), #4f8bff, #9b5cff, #ff5ca8, #38e1ff, #4f8bff);
+      position: absolute; inset: 0;
+      background: conic-gradient(#4f8bff, #9b5cff, #ff5ca8, #38e1ff, #4f8bff);
     }
-    /* Only the reply being written moves. Every settled bubble keeps its lit border, but a still
-       one: motion means the gradient is repainted every frame, and a thread of ten replies was
-       paying that ten times over for a shimmer nobody is reading. Now the movement means something
-       — something is happening — and costs one bubble's worth. */
+    /* The moving layer: a soft point of light running the border. offset-path traces the ring's own
+       rounded rectangle, so it follows the bubble's shape at any size without being told about it.
+       Hidden unless the browser has motion paths — a stationary dot in a corner would be worse than
+       no dot at all — and the still gradient carries the look on its own where that's the case. */
+    .ring b { display: none; }
+    @supports (offset-path: border-box) {
+      .ring b {
+        display: block; position: absolute; width: 120px; height: 120px; margin: -60px 0 0 -60px;
+        border-radius: 50%; filter: blur(7px);
+        background: radial-gradient(circle, rgba(255, 255, 255, 0.95), rgba(150, 190, 255, 0.55) 42%, transparent 72%);
+        offset-path: border-box; offset-distance: 0%; offset-rotate: 0deg;
+        animation: glow-travel 7s linear infinite;   /* idle: one lap every seven seconds */
+      }
+    }
     .ring.hot { opacity: 1; }
-    .ring.hot i { animation: glow-sweep 2s linear infinite; }
+    .ring.hot b { animation-duration: 2.4s; }        /* generating: races */
 
 
-    /* Interior counter-sweeping glow — only rendered while generating (see the template), so it
-       never sits behind settled text. Clipped to the bubble so it can't bleed outside. */
+    /* Interior glow — only rendered while generating (see the template), so it never sits behind
+       settled text. Clipped to the bubble so it can't bleed outside. */
     .inner {
       position: absolute; inset: 0; z-index: 0; pointer-events: none;
-      border-radius: 18px; overflow: hidden; opacity: 0.6;
+      border-radius: 18px; overflow: hidden; opacity: 0.55;
     }
-    /* Overhangs the bubble so the blur's own fade falls outside the clip rather than leaving a pale
-       rim inside it — 25%, not 250%: the point is to cover the edges, not to survive a rotation. */
-    .inner i {
-      position: absolute; inset: -25%; --sweep: 0deg;
-      background: conic-gradient(from var(--sweep), #4f8bff, #9b5cff, #ff5ca8, #38e1ff, #4f8bff);
-      filter: blur(22px);
-      animation: glow-sweep 4s linear infinite reverse;
+    /* A bigger, softer companion to the border light, orbiting the other way just inside the wall.
+       Same motion-path trick, same fixed cost. */
+    .inner b { display: none; }
+    @supports (offset-path: border-box) {
+      .inner b {
+        display: block; position: absolute; width: 260px; height: 260px; margin: -130px 0 0 -130px;
+        border-radius: 50%; filter: blur(26px);
+        background: radial-gradient(circle, rgba(155, 92, 255, 0.85), rgba(56, 225, 255, 0.35) 45%, transparent 70%);
+        offset-path: border-box; offset-distance: 0%; offset-rotate: 0deg;
+        animation: glow-travel 5s linear infinite reverse;
+      }
     }
 
     .bubble.assistant {
@@ -168,8 +189,9 @@ type LogItem =
     /* Let the interior glow read through while the reply is being written. */
     .bubble.assistant.streaming, .bubble.assistant.thinking { background: rgba(17, 19, 27, 0.72); }
 
+    /* Motion off: the border keeps its gradient, the travelling lights simply stop. */
     @media (prefers-reduced-motion: reduce) {
-      .ring i, .inner i, .bubble.user { animation: none; }
+      .ring b, .inner b, .bubble.user { animation: none; }
     }
 
     /* The user's own words: gradient and glow, but no looping motion — they're a reference point,

@@ -119,23 +119,15 @@ button { cursor: pointer; }
 }
 @keyframes blink { 50% { opacity: 0; } }
 
-/* The "AI glow": a conic gradient whose angle travels, on an element that exactly fills its box.
-   This started as a spinning square, which is cheaper per frame (a composited transform) but has to
-   be *huge* to cover the box at every angle — a square 2.5x the larger side, so 12 megapixels for a
-   580x980 bubble. Software rasterization hides that (it only rasters the visible clip); a GPU keeps
-   the whole layer, ~48 MB per bubble, and a handful of long replies is enough to stall compositing
-   or lose the context outright — a blank, unresponsive page.
-   An angle has no size, so the element stays bubble-sized. It repaints per frame instead, which is
-   why only ONE bubble ever animates: see .ring.hot in chat.ts. Needs the custom property registered
-   below to interpolate; where that's missing the border is simply static, which is a fine border. */
-@property --sweep {
-  syntax: '<angle>';
-  inherits: false;
-  initial-value: 0deg;
-}
-@keyframes glow-sweep {
-  from { --sweep: 0deg; }
-  to { --sweep: 360deg; }
+/* The "AI glow": one lap of a motion path, used by the lights that travel a bubble's border.
+   Moving a small element beats every alternative that scales with the bubble — a rotating gradient
+   square has to be 2.5x the bubble's larger side to cover it at every angle (12 megapixels for a
+   normal reply, and a GPU holds the whole layer: enough of those and compositing dies, taking the
+   page with it), while animating a conic gradient's angle repaints the entire bubble every frame.
+   This animates offset-distance on a 120px dot, so the cost is fixed no matter how long the reply. */
+@keyframes glow-travel {
+  from { offset-distance: 0%; }
+  to { offset-distance: 100%; }
 }
 
 /* The user bubble's own life: its gradient fill drifts across it, and the glow beneath it
