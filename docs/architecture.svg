@@ -1,0 +1,195 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1060 720" width="1060" height="720" role="img" aria-labelledby="svg-title svg-desc">
+  <title id="svg-title">TicketAssistant architecture</title>
+  <desc id="svg-desc">An Angular console talks to the TicketAssistant API over HTTP and SSE. The API runs a hand-written tool-calling loop against any LLM — Ollama, Anthropic, OpenAI or Google, switched per request — and writes through a single ITicketProvider seam into any ticket system — Jira Cloud, the mock board in this repo, or an in-memory stub — with several active at once. Every write pauses in the console for the user to approve, edit or decline.</desc>
+
+  <defs>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#6a5cff"/>
+      <stop offset="50%" stop-color="#9b5cff"/>
+      <stop offset="100%" stop-color="#e05cff"/>
+    </linearGradient>
+    <linearGradient id="wordmark" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#a99bff"/>
+      <stop offset="60%" stop-color="#e0a8ff"/>
+      <stop offset="100%" stop-color="#8ee7ff"/>
+    </linearGradient>
+    <radialGradient id="aurora1" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#7c6bff" stop-opacity="0.30"/>
+      <stop offset="100%" stop-color="#7c6bff" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="aurora2" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#e05cff" stop-opacity="0.20"/>
+      <stop offset="100%" stop-color="#e05cff" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="aurora3" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.16"/>
+      <stop offset="100%" stop-color="#38bdf8" stop-opacity="0"/>
+    </radialGradient>
+    <clipPath id="frame">
+      <rect x="0" y="0" width="1060" height="720" rx="20"/>
+    </clipPath>
+
+    <marker id="arrowViolet" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0 0 10 5 0 10 2.4 5z" fill="#9b8cff"/>
+    </marker>
+    <marker id="arrowGreen" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0 0 10 5 0 10 2.4 5z" fill="#4fd6a4"/>
+    </marker>
+    <marker id="arrowGrey" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0 0 10 5 0 10 2.4 5z" fill="#98a1b4"/>
+    </marker>
+  </defs>
+
+  <style>
+    text { font-family: Inter, 'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', sans-serif; }
+    .wm     { font-size: 21px; font-weight: 800; fill: url(#wordmark); }
+    .tag    { font-size: 11.5px; font-weight: 600; fill: #8b93a6; letter-spacing: 0.3px; }
+    .intro  { font-size: 11.5px; fill: #98a1b4; }
+    .h1     { font-size: 16.5px; font-weight: 700; fill: #edeef4; }
+    .h2     { font-size: 14.5px; font-weight: 700; fill: #edeef4; }
+    .h3     { font-size: 12.5px; font-weight: 700; fill: #e2e4ee; }
+    .sub    { font-size: 11px; fill: #757d90; }
+    .mono   { font-size: 10.5px; fill: #757d90; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .body   { font-size: 11.5px; fill: #a2a9ba; }
+    .lbl    { font-size: 10.5px; fill: #8b93a6; }
+    .kicker { font-size: 10.5px; font-weight: 700; fill: #7f8798; letter-spacing: 1.3px; }
+    .pill   { font-size: 12px; font-weight: 600; }
+    .accent { font-size: 11px; font-weight: 600; fill: #b9aeff; }
+  </style>
+
+  <!-- backdrop -->
+  <g clip-path="url(#frame)">
+    <rect x="0" y="0" width="1060" height="720" fill="#0a0b12"/>
+    <ellipse cx="180" cy="40" rx="420" ry="240" fill="url(#aurora1)"/>
+    <ellipse cx="900" cy="10" rx="380" ry="220" fill="url(#aurora2)"/>
+    <ellipse cx="620" cy="700" rx="440" ry="200" fill="url(#aurora3)"/>
+  </g>
+  <rect x="0.5" y="0.5" width="1059" height="719" rx="20" fill="none" stroke="rgba(255,255,255,0.09)"/>
+
+  <!-- ===== title block ===== -->
+  <path transform="translate(44,62) scale(1.15)" fill="url(#accent)"
+        d="M12 2c.5 4.6 2.6 6.7 8 8-5.4 1.3-7.5 3.4-8 8-.5-4.6-2.6-6.7-8-8 5.4-1.3 7.5-3.4 8-8z"/>
+  <text class="wm" x="80" y="90">TicketAssistant</text>
+  <text class="tag" x="80" y="112">one chat · every backend</text>
+  <g class="intro">
+    <text x="44" y="152">Describe a problem in plain words. The</text>
+    <text x="44" y="172">assistant looks tickets up, writes them up,</text>
+    <text x="44" y="192">and files them — nothing lands unapproved.</text>
+  </g>
+
+  <!-- ===== LLM row (top) ===== -->
+  <text class="kicker" x="659" y="46" text-anchor="middle">ANY LLM · SWITCHED PER REQUEST VIA IChatClient</text>
+
+  <g fill="rgba(110,168,255,0.10)" stroke="rgba(140,180,255,0.34)">
+    <rect x="300" y="66" width="196" height="44" rx="22"/>
+    <rect x="512" y="66" width="160" height="44" rx="22"/>
+    <rect x="688" y="66" width="160" height="44" rx="22"/>
+    <rect x="864" y="66" width="154" height="44" rx="22"/>
+  </g>
+  <g class="pill" fill="#d5e2ff">
+    <circle cx="324" cy="88" r="4" fill="#34d399"/><text x="338" y="92">Ollama · local GPU/CPU</text>
+    <circle cx="536" cy="88" r="4" fill="#6ea8ff"/><text x="550" y="92">Anthropic</text>
+    <circle cx="712" cy="88" r="4" fill="#6ea8ff"/><text x="726" y="92">OpenAI</text>
+    <circle cx="888" cy="88" r="4" fill="#6ea8ff"/><text x="902" y="92">Google</text>
+  </g>
+
+  <!-- rail: any one of them serves the request -->
+  <g stroke="rgba(155,140,255,0.45)" stroke-width="1.4">
+    <path d="M398 110 V 132"/><path d="M592 110 V 132"/><path d="M768 110 V 132"/><path d="M941 110 V 132"/>
+    <path d="M398 132 H 941"/>
+  </g>
+  <line x1="537" y1="276" x2="537" y2="134" stroke="#9b8cff" stroke-width="1.6"
+        marker-start="url(#arrowViolet)" marker-end="url(#arrowViolet)"/>
+  <text class="lbl" x="556" y="162">sends transcript + tool schemas</text>
+  <text class="lbl" x="556" y="182">gets streamed text + tool calls</text>
+
+  <!-- ===== console (left) ===== -->
+  <rect x="40" y="250" width="248" height="232" rx="16" fill="rgba(255,255,255,0.032)" stroke="rgba(255,255,255,0.10)"/>
+  <text class="h2" x="64" y="286">Angular console</text>
+  <text class="mono" x="64" y="306">localhost:4200</text>
+  <line x1="64" y1="322" x2="264" y2="322" stroke="rgba(255,255,255,0.08)"/>
+  <g class="body">
+    <circle cx="68" cy="344" r="2" fill="#6a7180"/><text x="80" y="348">streaming chat</text>
+    <circle cx="68" cy="370" r="2" fill="#6a7180"/><text x="80" y="374">editable confirmation cards</text>
+    <circle cx="68" cy="396" r="2" fill="#6a7180"/><text x="80" y="400">provider / model / compute</text>
+    <circle cx="68" cy="422" r="2" fill="#6a7180"/><text x="80" y="426">user switcher</text>
+    <circle cx="68" cy="448" r="2" fill="#6a7180"/><text x="80" y="452">Connect Jira (OAuth)</text>
+  </g>
+
+  <!-- human in the loop -->
+  <path d="M100 482 V 508" stroke="rgba(155,140,255,0.45)" stroke-width="1.4" stroke-dasharray="3 3"/>
+  <rect x="40" y="508" width="248" height="56" rx="16" fill="rgba(124,108,255,0.13)" stroke="rgba(124,108,255,0.38)"/>
+  <g class="accent">
+    <text x="62" y="532">every write pauses here first:</text>
+    <text x="62" y="552">approve, edit, or decline</text>
+  </g>
+
+  <!-- console <-> api -->
+  <line x1="296" y1="366" x2="356" y2="366" stroke="#98a1b4" stroke-width="1.6"
+        marker-start="url(#arrowGrey)" marker-end="url(#arrowGrey)"/>
+  <text class="lbl" x="326" y="354" text-anchor="middle">HTTP</text>
+  <text class="lbl" x="326" y="386" text-anchor="middle">SSE events</text>
+
+  <!-- ===== api (centre) ===== -->
+  <rect x="364" y="196" width="654" height="344" rx="18" fill="rgba(255,255,255,0.03)" stroke="url(#accent)" stroke-width="1.4"/>
+  <text class="h1" x="388" y="232">TicketAssistant.Api</text>
+  <text class="sub" x="388" y="252">ASP.NET Core · .NET 10 — the loop is hand-written, not a framework</text>
+
+  <rect x="806" y="216" width="190" height="26" rx="13" fill="rgba(255,255,255,0.05)" stroke="rgba(255,255,255,0.10)"/>
+  <text class="lbl" x="901" y="233" text-anchor="middle">bearer session · Jira OAuth</text>
+
+  <rect x="388" y="276" width="298" height="240" rx="14" fill="rgba(255,255,255,0.035)" stroke="rgba(255,255,255,0.09)"/>
+  <text class="h3" x="408" y="304">Orchestration loop</text>
+  <g class="body">
+    <text x="408" y="330">1 · send transcript + tool schemas</text>
+    <text x="408" y="352">2 · run the tools the model picks</text>
+    <text x="408" y="374">3 · feed results back → repeat</text>
+  </g>
+  <text class="accent" x="408" y="400">replies stream token by token</text>
+  <line x1="408" y1="418" x2="666" y2="418" stroke="rgba(255,255,255,0.08)"/>
+  <text class="h3" x="408" y="442">Guardrails</text>
+  <g class="body">
+    <text x="408" y="466">missing fields asked, not guessed</text>
+    <text x="408" y="488">duplicates caught · retries on</text>
+    <text x="408" y="506">malformed calls · undo last write</text>
+  </g>
+
+  <rect x="706" y="276" width="290" height="240" rx="14" fill="rgba(255,255,255,0.035)" stroke="rgba(255,255,255,0.09)"/>
+  <text class="h3" x="726" y="304">Ticket tools</text>
+  <g class="body">
+    <text x="726" y="330">create · status · comment · assign</text>
+    <text x="726" y="352">due date · resolve · search · list</text>
+  </g>
+  <line x1="726" y1="374" x2="976" y2="374" stroke="rgba(255,255,255,0.08)"/>
+  <text class="h3" x="726" y="398">ITicketProvider</text>
+  <g class="body">
+    <text x="726" y="422">one seam, any backend — and</text>
+    <text x="726" y="444">several at once: reads fan out</text>
+    <text x="726" y="466">and merge, each write routes to</text>
+    <text x="726" y="488">the backend owning the ticket</text>
+  </g>
+
+  <!-- provider <-> backends -->
+  <line x1="851" y1="540" x2="851" y2="608" stroke="#4fd6a4" stroke-width="1.6"
+        marker-start="url(#arrowGreen)" marker-end="url(#arrowGreen)"/>
+  <text class="lbl" x="870" y="562">create · update · comment</text>
+  <text class="lbl" x="870" y="582">read tickets + projects</text>
+
+  <g stroke="rgba(79,214,164,0.45)" stroke-width="1.4">
+    <path d="M435 610 V 630"/><path d="M696 610 V 630"/><path d="M920 610 V 630"/>
+    <path d="M435 610 H 920"/>
+  </g>
+
+  <!-- ===== backends row (bottom) ===== -->
+  <g fill="rgba(52,211,153,0.09)" stroke="rgba(52,211,153,0.30)">
+    <rect x="300" y="630" width="270" height="44" rx="22"/>
+    <rect x="586" y="630" width="220" height="44" rx="22"/>
+    <rect x="822" y="630" width="196" height="44" rx="22"/>
+  </g>
+  <g class="pill" fill="#cdefe1">
+    <circle cx="324" cy="652" r="4" fill="#34d399"/><text x="338" y="656">Jira Cloud · every site &amp; project</text>
+    <circle cx="610" cy="652" r="4" fill="#34d399"/><text x="624" y="656">Mock board (this repo)</text>
+    <circle cx="846" cy="652" r="4" fill="#34d399"/><text x="860" y="656">In-memory stub</text>
+  </g>
+  <text class="kicker" x="659" y="700" text-anchor="middle">ANY TICKET SYSTEM · SEVERAL ACTIVE AT ONCE VIA ITicketProvider</text>
+</svg>
