@@ -62,7 +62,7 @@ Then open:
 | --- | --- |
 | **Console** — the app, start here | <http://localhost:4200/> |
 | **Ticket board** — the "external" system | <http://localhost:5090/> |
-| API reference (Scalar) — the API has no UI of its own, so `:5080/` redirects here | <http://localhost:5080/scalar/v1> |
+| **API reference** (Scalar) | <http://localhost:5080/scalar/v1> |
 
 Try: *"The login page returns a 500 error when I submit."* The assistant gathers what's missing,
 checks for duplicates, and shows a card to approve — then watch the ticket appear on the board:
