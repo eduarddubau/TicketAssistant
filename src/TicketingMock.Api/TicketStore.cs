@@ -7,9 +7,11 @@ namespace TicketingMock.Api;
 /// the app resets it to the seed data. Public base URL is used to build shareable ticket
 /// links so the assistant can hand the user a URL that opens this app's board.
 ///
-/// Reads and writes are scoped by <c>owner</c> (the X-User-Id passed by the caller): a
-/// null/empty owner sees everything (the admin board), otherwise the tickets that user
-/// <i>created or is assigned</i> — work landed on someone's plate is theirs to see too.
+/// Reads and writes are scoped by <c>owner</c> (the X-User-Id passed by the caller): the tickets
+/// that user <i>created or is assigned</i> — work landed on someone's plate is theirs to see too.
+/// Two things see the whole board instead: a caller with no user header at all (the board page
+/// itself, which has no session to speak of), and the reserved user <c>admin</c>, which is how the
+/// console asks for that view deliberately rather than by omission.
 /// This is a test-only stand-in for real per-user authorization.
 /// </summary>
 public sealed class TicketStore
@@ -24,10 +26,19 @@ public sealed class TicketStore
         Seed();
     }
 
+    /// <summary>
+    /// The one name that isn't a person: whoever asks as <c>admin</c> gets the whole board. Reserved
+    /// rather than seeded, so nothing is ever owned by it — "everything" is the rule, not a pile of
+    /// tickets that happen to carry the name.
+    /// </summary>
+    public const string AdminUser = "admin";
+
     // A user's own work is what they created *or* what is assigned to them — someone else filing a
-    // task and putting your name on it makes it yours to see. An empty owner is the admin board.
+    // task and putting your name on it makes it yours to see. No user at all is the board page,
+    // which has no session; admin is the same view asked for on purpose.
     private static bool VisibleTo(MockTicket ticket, string? owner) =>
         string.IsNullOrEmpty(owner)
+        || string.Equals(owner, AdminUser, StringComparison.OrdinalIgnoreCase)
         || string.Equals(ticket.Owner, owner, StringComparison.OrdinalIgnoreCase)
         || string.Equals(ticket.Assignee, owner, StringComparison.OrdinalIgnoreCase);
 

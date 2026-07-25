@@ -178,7 +178,7 @@ Every switcher in the header takes effect on the next message — no restart:
 Both filters are enforced by the API rather than asked of the model, so they hold whatever the model decides to do — and a filtered read tells the model a filter is on, so it says so instead of reporting an empty backlog.
 
 | *status badge* | Where the loaded model is **actually** running, straight from Ollama's own report: `GPU`, `CPU`, a split when the model doesn't fully fit in VRAM, or idle — and `GPU off` when the machine has an NVIDIA GPU the container isn't using. |
-| **User** | Who you are on the mock board: `alice` and `bob` each own seeded work, and `nobody` owns none — pick that to see your connected accounts (Jira) on their own. |
+| **User** | Who you are on the mock board — it scopes tickets to what you raised or were assigned. `alice` and `bob` each own seeded work; `admin` is the board's reserved name and sees all of it. |
 | **Debug** | Opens the debug console (below). Also `Ctrl` + `` ` ``. |
 | **Connect Jira** | Logs *you* into *your own* Jira through an OAuth popup (shown only when the Jira backend is enabled). |
 

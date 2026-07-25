@@ -9,15 +9,15 @@ import { API_BASE } from '../config';
 @Injectable({ providedIn: 'root' })
 export class SessionService {
   /**
-   * The people this demo has, plus nobody. A fixed list rather than a free-text box: the name only
-   * means anything to the mock board, which has seeded work for exactly these two, so typing
-   * anything else produced an empty screen with no hint as to why.
+   * The people this demo has, plus the board's admin. A fixed list rather than a free-text box: the
+   * name only means anything to the mock board, which has seeded work for exactly these two, so
+   * typing anything else produced an empty screen with no hint as to why.
    *
-   * The empty entry is that empty screen made deliberate — the API records it as "guest", who owns
-   * none of the mock's tickets, so reads fall through to whatever real account is connected. It's
-   * how you see Jira on its own without turning the mock backend off.
+   * "admin" is a reserved name on the mock, not a third person: it sees every ticket regardless of
+   * who raised it — the same view its board page shows — which is the one honest way to offer
+   * "show me everything" now that a *missing* identity deliberately shows nothing.
    */
-  static readonly USERS = ['alice', 'bob', ''] as const;
+  static readonly USERS = ['alice', 'bob', 'admin'] as const;
 
   readonly userName = signal(known(localStorage.getItem('ta-user')));
   readonly sessionId = signal<string | null>(null);
