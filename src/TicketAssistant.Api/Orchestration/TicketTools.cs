@@ -39,6 +39,40 @@ public static class TicketTools
     public static bool RequiresConfirmation(string toolName) => ConfirmationRequiredTools.Contains(toolName);
 
     /// <summary>
+    /// One system's share of a read result: the plain-English name of the backend, and the tickets
+    /// that live in it.
+    /// </summary>
+    private sealed record TicketGroup(string Source, IReadOnlyList<CanonicalTicket> Tickets);
+
+    /// <summary>A read result: how to present it, and the tickets grouped by the system they live in.</summary>
+    private sealed record GroupedTickets(string Instructions, IReadOnlyList<TicketGroup> BySource);
+
+    /// <summary>
+    /// Carried at the top of every grouped read. Instructions travel with the data rather than
+    /// sitting only in the tool description or the system prompt, because that is the one place a
+    /// 3B model reliably reads them — the same reason the duplicate guardrail spells out what to do
+    /// inside its tool result instead of trusting the standing instructions.
+    /// </summary>
+    private const string GroupedTicketsInstructions =
+        "One section per bySource group: its 'source' text copied exactly as the heading, then that " +
+        "group's tickets as one short line each (id, title, status, priority). Some groups are demo " +
+        "data, so never merge groups or drop a source.";
+
+    /// <summary>
+    /// Groups a fanned-out read by the system each ticket came from, so the answer can't quietly
+    /// present demo tickets as real ones. Shape does the work that wording couldn't: told to
+    /// mention a per-ticket "source" field, a small model drops it from a flat array no matter how
+    /// firmly the tool description asks — but it keeps headings it was handed. Ordered by source so
+    /// repeated questions come back in a stable order.
+    /// </summary>
+    private static GroupedTickets GroupBySource(IEnumerable<CanonicalTicket> tickets) =>
+        new(GroupedTicketsInstructions,
+            tickets.GroupBy(t => t.Source, StringComparer.Ordinal)
+                   .OrderBy(g => g.Key, StringComparer.Ordinal)
+                   .Select(g => new TicketGroup(g.Key, g.ToList()))
+                   .ToList());
+
+    /// <summary>
     /// Parses a loose string into an enum, case-insensitively, returning null for empty or
     /// unrecognized values instead of throwing — so a weak model's "open"/"URGENT"/"" doesn't
     /// crash a read tool during argument binding.
@@ -82,12 +116,15 @@ public static class TicketTools
                 description: "Fetch a single ticket by its provider-native ID (e.g. 'PROJ-1001')."),
 
             AIFunctionFactory.Create(
-                (string query, CancellationToken ct) => provider.SearchTicketsAsync(query, ct),
+                async (string query, CancellationToken ct) =>
+                    GroupBySource(await provider.SearchTicketsAsync(query, ct)),
                 name: "search_tickets",
                 description: "Search tickets by words appearing in their title, description or labels " +
                               "(e.g. 'login', 'printer'). This matches text only — to filter by status " +
-                              "or priority use list_tickets instead. Results span every connected system; " +
-                              "mention each match's project so the user knows where it lives."),
+                              "or priority use list_tickets instead. Matches span every connected system, " +
+                              "so they come back grouped: each group has a 'source' naming the system its " +
+                              "'tickets' live in. Keep the groups when you answer — give every match its " +
+                              "project, and quote its group's 'source' word for word."),
 
             AIFunctionFactory.Create(
                 // status/priority are taken as loose strings and parsed case-insensitively rather
@@ -95,16 +132,19 @@ public static class TicketTools
                 // otherwise fail argument binding before the tool even runs.
                 // Defaults matter as much as nullability here: a parameter without one is treated
                 // as *required*, so a model omitting it fails argument binding before the tool runs.
-                (string? status = null, string? priority = null, CancellationToken ct = default) =>
-                    provider.ListTicketsAsync(ParseEnum<TicketStatus>(status), ParseEnum<TicketPriority>(priority), ct),
+                async (string? status = null, string? priority = null, CancellationToken ct = default) =>
+                    GroupBySource(await provider.ListTicketsAsync(
+                        ParseEnum<TicketStatus>(status), ParseEnum<TicketPriority>(priority), ct)),
                 name: "list_tickets",
                 description: "List the user's tickets, optionally filtered by status (Open, InProgress, " +
                               "Blocked, Resolved, Closed) and/or priority (Low, Medium, High, Urgent). " +
                               "Use this for questions like 'my open tickets', 'anything urgent?', or " +
-                              "'all my tickets' — omit both filters to list everything. Results span " +
-                              "every connected system, so each ticket carries a 'project' and a " +
-                              "'providerName': when you list tickets, always say which project each one " +
-                              "belongs to, since the same user can have tickets in several."),
+                              "'all my tickets' — omit both filters to list everything. Tickets span every " +
+                              "connected system, so they come back grouped: each group has a 'source' " +
+                              "naming the system its 'tickets' live in. Answer with those same groups — a " +
+                              "heading quoting the group's 'source' word for word, then its tickets with " +
+                              "their project — because some groups are only demo data and the user cannot " +
+                              "tell which from the ticket alone."),
 
             AIFunctionFactory.Create(
                 (CancellationToken ct) => provider.ListProjectsAsync(ct),

@@ -66,6 +66,17 @@ public sealed class ConversationStore
         back to Open), add an update/comment to it, or create a separate new ticket. Only
         create a new one if the user explicitly asks for it.
 
+        SAY WHERE EVERY TICKET LIVES
+
+        Reads span every connected system at once, so a single list can mix real tickets with
+        demo data. Whenever you show a ticket — listing, searching, summarizing, or reporting
+        a change — say which system it came from, not just its project. Every ticket a tool
+        returns carries a "source" field already written in plain English ("Jira", "the mock
+        board (demo data, not a real ticket)"); repeat it as-is rather than rewording it, and
+        never guess the system from a ticket's ID prefix. Group by system when you list
+        several, and keep the project key and the ticket's full ID alongside it, so nobody
+        chases a fixture thinking it's real work.
+
         Tickets may have a due date. When you list or summarize them, call out anything whose
         due date has passed and that isn't Resolved or Closed as overdue, so it doesn't get
         forgotten. Set or change a deadline with set_due_date.
