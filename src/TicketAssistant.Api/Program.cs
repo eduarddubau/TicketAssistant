@@ -158,10 +158,14 @@ var ticketUrlTemplate = UsesBackend("Http") || UsesBackend("InMemory")
     ? builder.Configuration["Tickets:TicketUrlTemplate"] ?? $"{boardUrl}/#{{id}}"
     : null;
 
-// Start a new chat. Returns its id, the greeting, the mock link template, and whether Jira is
-// enabled (so the SPA shows the connect UI and gates chat behind it).
+// Start a new chat. Returns its id, the greeting it opened with (one of several, rotated per
+// chat), the mock link template, and whether Jira is enabled (so the SPA shows the connect UI
+// and gates chat behind it).
 app.MapPost("/api/conversations", (ConversationStore store) =>
-    Results.Ok(new { conversationId = store.Create(), greeting = ConversationStore.Greeting, boardUrl, ticketUrlTemplate, jiraEnabled }));
+{
+    var (conversationId, greeting) = store.Create();
+    return Results.Ok(new { conversationId, greeting, boardUrl, ticketUrlTemplate, jiraEnabled });
+});
 
 // Which LLM providers exist, which one this request would use, and which are actually
 // usable (Ollama always; hosted providers only when their API key is configured) — the
