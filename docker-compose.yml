@@ -27,7 +27,7 @@ services:
       Tickets__Jira__ProjectKey: ${TICKETS_JIRA_PROJECT_KEY:-}
       Tickets__Jira__IssueType: ${TICKETS_JIRA_ISSUE_TYPE:-Task}
       Tickets__Jira__ScopeToReporter: ${TICKETS_JIRA_SCOPE_TO_REPORTER:-true}
-      # Atlassian OAuth 2.0 (3LO) app — only read when Tickets__Backend=Jira. The redirect and
+      # Atlassian OAuth 2.0 (3LO) app — only read when Tickets__Backends includes Jira. The redirect and
       # frontend origin default to this compose's host ports.
       Atlassian__ClientId: ${ATLASSIAN_CLIENT_ID:-}
       Atlassian__ClientSecret: ${ATLASSIAN_CLIENT_SECRET:-}
