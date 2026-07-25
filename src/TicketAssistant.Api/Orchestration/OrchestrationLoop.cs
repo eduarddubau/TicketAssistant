@@ -204,8 +204,8 @@ public sealed class OrchestrationLoop(
                 {
                     // yield can't live inside a catch, so we surface the error out here.
                     yield return new OrchestrationEvent.AssistantText(
-                        "Sorry — I couldn't reach the language model just now (it may be rate-limited or " +
-                        "unavailable). Please try again in a moment.");
+                        "Ah, sorry — I can't reach the language model at the moment (it may be busy or " +
+                        "temporarily unavailable). Nothing was lost, so give it a moment and try again 🙏");
                     yield break;
                 }
 
@@ -276,7 +276,8 @@ public sealed class OrchestrationLoop(
                 if (botchedAttempts >= maxBotchedAttempts)
                 {
                     const string apology =
-                        "Sorry — I had trouble with that. Could you rephrase or give me a bit more detail?";
+                        "Sorry, that one got away from me — nothing happened on your tickets. Could you " +
+                        "put it another way, or give me a little more detail?";
                     // If junk already streamed, rewrite the bubble instead of adding a new one.
                     if (blobEmbeddedInStreamedText)
                     {
@@ -323,8 +324,8 @@ public sealed class OrchestrationLoop(
                 }
 
                 yield return new OrchestrationEvent.AssistantText(
-                    "Sorry — I didn't manage to put that into words. Could you rephrase, or tell me what " +
-                    "you'd like me to do next?");
+                    "Sorry — I lost my train of thought there. Could you say that again, or tell me what " +
+                    "you'd like me to do next? I'm still here 🙂");
                 yield break;
             }
 
