@@ -17,14 +17,8 @@ import { KindsService } from '../services/kinds.service';
   standalone: true,
   template: `
     <div class="bar">
-      <div class="ctl">
-        <span class="lbl">Model</span>
-        <input list="ollama-models" class="inp model" [value]="llm.model()" (change)="llm.setModel($any($event.target).value)" />
-        <datalist id="ollama-models">
-          @for (m of llm.ollamaModels(); track m) { <option [value]="m"></option> }
-        </datalist>
-      </div>
-
+      <!-- Provider first, then its model: choosing a provider resets the model to that provider's
+           default, so the wider choice belongs upstream of the narrower one. -->
       <div class="ctl">
         <span class="lbl">Provider</span>
         <select class="sel" [value]="llm.provider()" (change)="onProvider($any($event.target).value)">
@@ -34,6 +28,14 @@ import { KindsService } from '../services/kinds.service';
             </option>
           }
         </select>
+      </div>
+
+      <div class="ctl">
+        <span class="lbl">Model</span>
+        <input list="ollama-models" class="inp model" [value]="llm.model()" (change)="llm.setModel($any($event.target).value)" />
+        <datalist id="ollama-models">
+          @for (m of llm.ollamaModels(); track m) { <option [value]="m"></option> }
+        </datalist>
       </div>
 
       <div class="ctl">
