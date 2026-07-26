@@ -11,18 +11,24 @@
   <img src="https://img.shields.io/badge/Angular-22-DD0031?logo=angular&logoColor=white" alt="Angular 22">
   <img src="https://img.shields.io/badge/LLM-Ollama%20%C2%B7%20Anthropic%20%C2%B7%20OpenAI%20%C2%B7%20Google-7c6bff" alt="LLM providers">
   <img src="https://img.shields.io/badge/tickets-Jira%20Cloud%20%C2%B7%20mock%20board-34d399" alt="Ticket backends">
+  <img src="https://img.shields.io/badge/console-EN%20%C2%B7%20RO%20%C2%B7%20DE-38bdf8" alt="Console languages: English, Romanian, German">
   <img src="https://img.shields.io/badge/status-proof%20of%20concept-f59e0b" alt="Proof of concept">
 </p>
 
 <p align="center">
   <img src="docs/console.png" width="900"
-       alt="The TicketAssistant console: the user reports that nobody can sign in after a deploy, and the assistant replies and offers an editable confirmation card for the new ticket, with pickers for provider and project.">
+       alt="The TicketAssistant console: the user asks for a ticket about uploads failing on the documents page, and the assistant replies and offers an editable confirmation card carrying provider, project and kind pickers, title, description and severity — above a header of source, kind, user, provider, model, compute, appearance, language and debug controls.">
 </p>
 
 > [!WARNING]
 > **Proof of concept.** An exploratory prototype for learning and demonstration, **not**
 > production software: in-memory storage, sessions minted on request without a login, and a
 > small local model by default. See [Caveats](#caveats-its-a-poc).
+
+**Contents** — [What it does](#what-it-does) · [Quick start](#quick-start) ·
+[Architecture](#architecture) · [The console](#the-console) ·
+[The debug console](#the-debug-console) · [Configuration](#configuration) ·
+[Caveats](#caveats-its-a-poc)
 
 ## What it does
 
@@ -40,13 +46,15 @@ That's everything you raised **and everything assigned to you**, of every kind �
 bugs, stories — kept apart rather than lumped together, so *"what tasks do I have?"* and *"open a
 task for that"* mean what they say.
 
-Two things it is deliberately not shy about:
+Three things it is deliberately not shy about:
 
 - **Any LLM.** Ollama (local, no API key), Anthropic, OpenAI, or Google — switched from the console's
   dropdown, per request, with no restart.
 - **Any ticketing system, several at once.** A real Jira Cloud account (every site and project the
   user can reach, via per-user OAuth), the mock board in this repo, an in-memory stub — or a
   combination. Reads merge across all of them; each write routes to the backend that owns the ticket.
+- **Any of three languages, and either theme.** English, Romanian or German — and the language moves
+  the *assistant*, not just the buttons. Light or dark, five accent schemes, and both remembered.
 
 ## Quick start
 
@@ -69,13 +77,17 @@ Then open:
 | **Ticket board** — the "external" system | <http://localhost:5090/> |
 | **API reference** (Scalar) | <http://localhost:5080/scalar/v1> |
 
-Try: *"The login page returns a 500 error when I submit."* The assistant gathers what's missing,
-checks for duplicates, and shows a card to approve — then watch the ticket appear on the board:
+Try: *"Uploads over 10 MB fail on the documents page — please raise a ticket for it."* The assistant
+gathers what's missing, checks for duplicates, and shows a card to approve — then watch the ticket
+appear on the board (top left, seconds old, beside the seeded demo data):
 
 <p align="center">
   <img src="docs/board.png" width="900"
-       alt="The mock ticketing board showing two tickets with status, priority, labels, owner and activity count.">
+       alt="The mock ticketing board: ten cards, each with its id, type, status, priority, description, labels, owner, assignee, comment count and age — the newest being the ticket the assistant just filed.">
 </p>
+
+Then try *"the login page returns a 500 error when I submit"* — the board already has that one, so
+the assistant says so and offers to reopen or update it instead of filing a second copy.
 
 Plain compose works too — no GPU offer, CPU unless `OLLAMA_GPU_DEVICE` is set in `.env`, and models
 download in the background (watch with `podman compose logs -f ollama-pull`):
@@ -98,7 +110,7 @@ container when the LLM runs locally:
 | --- | --- |
 | [`src/TicketAssistant.Api`](src/TicketAssistant.Api) | The assistant: chat endpoints, the tool-calling loop, the ticket-provider abstraction, and auth (bearer sessions + Jira OAuth). |
 | [`src/TicketingMock.Api`](src/TicketingMock.Api) | A stand-in "external ticketing system" — in-memory store, REST API, and a live board UI, so you can watch tickets land in a separate app. |
-| [`src/web`](src/web) | The Angular console: streaming chat, editable confirmation cards, the switchers, and the debug console. |
+| [`src/web`](src/web) | The Angular console: streaming chat, editable confirmation cards, the switchers, theme/scheme/language, and the debug console. |
 
 ### What it demonstrates
 
@@ -112,7 +124,9 @@ container when the LLM runs locally:
   instead of calling the tool), scrubs them off the screen and retries; recovers from an **empty
   reply**; and after a **declined** confirmation stops the model replaying the declined ticket when
   your next message is about something else — while still allowing it when you say "actually, go
-  ahead".
+  ahead". And when a read comes back with eight tickets but the reply names three of them — or none
+  — the **listing is rendered from the tool result** instead, because an answer that leaves out
+  what was found isn't one.
 - **Human-in-the-loop writes.** Every ticket-changing action pauses for a card the user can **edit**
   before approving, and the last change can be **undone**.
 - **Two clean seams.** `IChatClient` for the model, `ITicketProvider` for the backend, both resolved
@@ -126,6 +140,16 @@ container when the LLM runs locally:
   reads arrive grouped by kind *and* by system (so demo data can't pass for real work), and a create
   files the kind you asked for — with the confirmation card offering only the kinds that project
   actually accepts.
+- **Translated to the edges.** English, Romanian and German, where the *keys* are the source of
+  truth — a translation that falls behind is a build error, not a stray English word in a Romanian
+  sentence. It reaches the assistant too: the replies, the opening greeting, and the words a listing
+  is built from. What stays put is what the user matches against their own board — ids, project
+  keys, statuses, priorities, and the type names the backends define.
+- **Theming that goes all the way down.** Light and dark are `light-dark()` pairs and accents are
+  plain colours that can be mixed, so a new scheme is three colours and nothing else — no dark-only
+  literals left in the components. The debug console's category hues sit *outside* the scheme on
+  purpose: "purple means a tool call" would stop meaning anything if picking emerald turned half the
+  panel green.
 - **Per-user scoping** — what you raised *or* were assigned — and a **local GPU/CPU choice** for
   Ollama that's auto-detected at startup and switchable live from the console.
 - **A trace you can read.** A togglable [debug console](#the-debug-console) streams the whole turn —
@@ -138,13 +162,21 @@ container when the LLM runs locally:
 - **`Orchestration/`** — the core.
   - `OrchestrationLoop.cs` — the send-model → run-tools → repeat loop, the confirmation pause, and
     every guardrail (missing fields, duplicates, malformed-tool-call recovery, empty replies,
-    declined-ticket replay).
+    declined-ticket replay, and the listing check that replaces an answer leaving out what a read
+    returned).
   - `TicketTools.cs` — the operations exposed to the model as callable tools: `get_ticket`,
     `search_tickets`, `list_tickets`, `list_projects`, `create_ticket`, `update_ticket_status`,
     `add_comment`, `resolve_ticket`, `assign_ticket`, `set_due_date`, `undo_last_action`.
   - `ChatClientFactory.cs` — resolves which LLM serves each request; the console's
     provider/model/compute switchers work by sending headers this factory reads.
   - `ConversationStore.cs` — per-chat history, the system prompt, and the rotating openers.
+  - `Greetings.cs` — four openers per language, rotated. Translated rather than left in English
+    because the greeting is the assistant's own first turn, and a small model imitates the
+    transcript over any instruction it was given.
+  - `LanguageScope.cs` — `X-Language`: the line appended to the system prompt, and the handful of
+    words a listing is built from, in the language being read.
+  - `SourceScope.cs` / `ItemTypeScope.cs` — the header's two read filters (`X-Sources`,
+    `X-Item-Types`), narrowing the fanned-out reads in the API rather than asking the model to.
   - `UndoStore.cs` — remembers, per user, how to reverse the last write.
   - `OrchestrationEvent.cs` — the events streamed to the browser (assistant text/deltas, tool ran,
     confirmation required, replace-streamed-text, and the debug trace).
@@ -165,29 +197,57 @@ container when the LLM runs locally:
 
 ## The console
 
-Every switcher in the header takes effect on the next message — no restart:
+The header is two groups, and the split is the point. On the left, **what you're looking at**; on the
+right, **how the machine is set up**. Every switcher takes effect on the next message — no restart —
+and an empty chat offers four one-click openers so nobody has to guess what to type.
+
+**What you're looking at**
 
 | Control | What it does |
 | --- | --- |
-| **Model** | Which model answers — the models the chosen provider is *configured* with, so you can't pick one that was never downloaded. |
-| **Provider** | Ollama / Anthropic / OpenAI / Google. A provider with no API key configured is visibly disabled. |
-| **Compute** | Ollama only: *GPU* (used when the container has one) or *CPU* (forced). |
 | **Sources** | Which systems reads cover — Jira, the mock board, the in-memory stub. Tick none for all of them. |
 | **Kinds** | Which kinds of item reads cover — tick any combination of the types your projects actually offer, or none for all of them. |
-
-Both filters are enforced by the API rather than asked of the model, so they hold whatever the model decides to do — and a filtered read tells the model a filter is on, so it says so instead of reporting an empty backlog.
-
-| *status badge* | Where the loaded model is **actually** running, straight from Ollama's own report: `GPU`, `CPU`, a split when the model doesn't fully fit in VRAM, or idle — and `GPU off` when the machine has an NVIDIA GPU the container isn't using. |
 | **User** | Who you are on the mock board — it scopes tickets to what you raised or were assigned. `alice` and `bob` each own seeded work; `charlie` owns none, so reads come only from your connected accounts (Jira on its own); `admin` is the board's reserved name and sees all of it. |
+
+Both filters are enforced by the API rather than asked of the model, so they hold whatever the model
+decides to do — and a filtered read tells the model a filter is on, so it says so instead of
+reporting an empty backlog.
+
+**How it's set up**
+
+| Control | What it does |
+| --- | --- |
+| **Provider** | Ollama / Anthropic / OpenAI / Google. A provider with no API key configured is visibly disabled. Picking one resets the model to that provider's default, which is why it sits ahead of the model. |
+| **Model** | Which model answers — the models the chosen provider is *configured* with, so you can't pick one that was never downloaded. Each name carries a note on what it's good for. |
+| **Compute** | Ollama only: *GPU* (used when the container has one) or *CPU* (forced). |
+| *status badge* | Where the loaded model is **actually** running, straight from Ollama's own report: `GPU`, `CPU`, a split when the model doesn't fully fit in VRAM, or idle — and `GPU off` when the machine has an NVIDIA GPU the container isn't using. |
 | **Theme** | Light or dark, in one click. Untouched, it follows the OS — including live, if the OS flips at sunset. |
 | **Scheme** | The accent colour: violet, indigo, emerald, rose or slate. Every scheme is defined in both themes, so the two choices are independent. |
 | **Language** | English, Romanian or German. It follows the browser's language until you pick one, and it moves the assistant too — the replies, the opening greeting and the words a listing is built from all arrive in it. |
 | **Debug** | Opens the debug console (below). Also `Ctrl` + `` ` ``. |
 | **Connect Jira** | Logs *you* into *your own* Jira through an OAuth popup (shown only when the Jira backend is enabled). |
 
+<p align="center">
+  <img src="docs/appearance.png" width="900"
+       alt="The console in light theme with the emerald scheme and the Romanian language selected: the scheme popover is open showing violet, indigo, emerald, rose and slate, and the assistant's reply lists the open items in Romanian, grouped by kind and by system.">
+</p>
+
 Theme, scheme and language are the exceptions to "next message": they apply at once and live in the
 browser. Theme and scheme are never sent anywhere and are re-applied before the first paint of a
-reload, so nothing flashes; the language rides on a header so the assistant answers in it.
+reload, so nothing flashes; the language rides on a header, so the assistant answers in it.
+
+Theme and scheme also *arrive* rather than blink: the new colours are clipped in as a circle opening
+from the control you clicked (View Transitions API), with the usual 0.15s transitions suppressed for
+the length of it — otherwise every accent fades to its new value underneath the circle and dissolves
+the edge the effect is made of. A reader who asks for reduced motion gets the instant swap. Language
+deliberately doesn't animate: there the words themselves change, and an animation over text is a
+delay before you can read it.
+
+Switching language mid-chat re-fetches the opening greeting, but only while the transcript is still
+just that greeting — the case that matters, since you pick a language on arrival. Once there are real
+turns they stay as they happened: the greeting is also the assistant's first turn in the history the
+model sees, and a transcript whose opening line disagrees with what the model was told it said is
+what made replies come back in English.
 
 What stays in English whatever you pick: ticket ids, project keys, statuses and priorities (they are
 identifiers — translating them would stop them matching your board), the item-type names the
@@ -201,7 +261,7 @@ the console can show you the whole turn as it happens — docked beside the chat
 
 <p align="center">
   <img src="docs/debug-console.png" width="900"
-       alt="The console with the debug panel open on the right: a timeline of the turn — system prompt, user prompt, HTTP request, the call to the model, its reply, a list_tickets tool call and result, and the streamed answer — each row with a timestamp and duration.">
+       alt="The console with the debug panel docked on the right: stage filters across the top, then a timeline of one turn — settings, system prompt, user prompt, the HTTP request and response, the call to the model, its reply, a list_tickets call and result, and the streamed answer — each row timestamped and carrying the wait before it. On the left, the assistant's answer lists the open items grouped by kind.">
 </p>
 
 One row per step, in order, from both ends of the wire — `web` rows are what the browser sent and
@@ -451,6 +511,10 @@ what it hands to compose, and how it ends when the model download fails.
   a declined action, or narrates things that didn't happen. The orchestration layer catches the first
   two and keeps tool calls and confirmation cards correct, but the model's *prose* can still be
   muddled. Hosted providers or a larger local model behave more consistently.
+- **The reply's language is asked for, not enforced** — the console and the listing words are
+  translated outright, but which language the model *writes* in is an instruction like any other, and
+  a 3B model sometimes answers in English regardless. There is no honest way to fix that after the
+  fact; `qwen3:4b-instruct` or a hosted provider holds the language far more consistently.
 - **Duplicate detection is a heuristic** — title keyword overlap, not semantic similarity, so very
   differently-worded duplicates can slip through.
 - **Single instance only** — the in-memory stores assume one running process.
