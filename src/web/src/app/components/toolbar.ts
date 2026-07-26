@@ -61,8 +61,13 @@ import { I18nService } from '../services/i18n.service';
         <!-- Who the mock board thinks you are. "admin" is its reserved name for the whole board. -->
         <div class="ctl" [title]="i18n.t('toolbar.userTitle')">
           <span class="lbl">{{ i18n.t('toolbar.user') }}</span>
-          <select class="sel user" [value]="session.userName()" (change)="onUser($any($event.target).value)">
-            @for (u of session.users; track u) { <option [value]="u">{{ u }}</option> }
+          <!-- Which option is current is marked on the options, not as [value] on the select: the
+               select's binding runs before @for has made any options, so it lands on an empty list
+               and is dropped, leaving the box showing the first name whoever you actually are. -->
+          <select class="sel user" (change)="onUser($any($event.target).value)">
+            @for (u of session.users; track u) {
+              <option [value]="u" [selected]="u === session.userName()">{{ u }}</option>
+            }
           </select>
         </div>
       </div>
@@ -72,9 +77,9 @@ import { I18nService } from '../services/i18n.service';
            default, so the wider choice belongs upstream of the narrower one. -->
       <div class="ctl">
         <span class="lbl">{{ i18n.t('toolbar.provider') }}</span>
-        <select class="sel" [value]="llm.provider()" (change)="onProvider($any($event.target).value)">
+        <select class="sel" (change)="onProvider($any($event.target).value)">
           @for (p of llm.info()?.providers ?? []; track p) {
-            <option [value]="p" [disabled]="!(llm.info()?.configured?.[p])">
+            <option [value]="p" [selected]="p === llm.provider()" [disabled]="!(llm.info()?.configured?.[p])">
               {{ p }}{{ llm.info()?.configured?.[p] ? '' : ' (' + i18n.t('toolbar.noKey') + ')' }}
             </option>
           }
@@ -85,9 +90,9 @@ import { I18nService } from '../services/i18n.service';
            point, but what separates them is whether a listing comes back whole. -->
       <div class="ctl" [title]="modelHint()">
         <span class="lbl">{{ i18n.t('toolbar.model') }}</span>
-        <select class="sel model" [value]="llm.model()" (change)="llm.setModel($any($event.target).value)">
+        <select class="sel model" (change)="llm.setModel($any($event.target).value)">
           @for (m of llm.modelOptions(); track m.id) {
-            <option [value]="m.id">{{ m.id }}{{ m.note ? ' — ' + m.note : '' }}</option>
+            <option [value]="m.id" [selected]="m.id === llm.model()">{{ m.id }}{{ m.note ? ' — ' + m.note : '' }}</option>
           }
         </select>
       </div>
