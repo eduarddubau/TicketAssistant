@@ -6,6 +6,7 @@ import { LlmService } from './llm.service';
 import { DebugService } from './debug.service';
 import { KindsService } from './kinds.service';
 import { SourcesService } from './sources.service';
+import { I18nService } from './i18n.service';
 
 /**
  * The chat API. Reads are plain JSON; the message/confirm calls return Server-Sent Events, which
@@ -23,11 +24,12 @@ export class ApiService {
   private readonly debug = inject(DebugService);
   private readonly kinds = inject(KindsService);
   private readonly sources = inject(SourcesService);
+  private readonly i18n = inject(I18nService);
 
   async createConversation(): Promise<ConversationInfo> {
     let res = await fetch(`${API_BASE}/api/conversations`, {
       method: 'POST',
-      headers: { ...this.session.authHeader(), ...this.debug.headers() },
+      headers: { ...this.session.authHeader(), ...this.i18n.headers(), ...this.debug.headers() },
     });
 
     // A session the API doesn't know — it restarted, and they live in its memory — is now a 401
@@ -39,7 +41,7 @@ export class ApiService {
       await this.session.ensure();
       res = await fetch(`${API_BASE}/api/conversations`, {
         method: 'POST',
-        headers: { ...this.session.authHeader(), ...this.debug.headers() },
+        headers: { ...this.session.authHeader(), ...this.i18n.headers(), ...this.debug.headers() },
       });
     }
 
@@ -58,7 +60,7 @@ export class ApiService {
 
     try {
       const res = await fetch(`${API_BASE}/api/system-prompt`, {
-        headers: { ...this.session.authHeader(), ...this.debug.headers() },
+        headers: { ...this.session.authHeader(), ...this.i18n.headers(), ...this.debug.headers() },
       });
       if (!res.ok) return;
       const { systemPrompt } = await res.json();
@@ -95,6 +97,7 @@ export class ApiService {
       ...this.llm.headers(),
       ...this.kinds.headers(),
       ...this.sources.headers(),
+      ...this.i18n.headers(),
       ...this.debug.headers(),
     };
     const startedAt = performance.now();

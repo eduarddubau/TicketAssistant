@@ -12,7 +12,7 @@ services:
       Ollama__BaseUrl: http://ollama:11434
       # Shared with ollama-pull below: first entry = the assistant's default model, the
       # rest are downloaded too so the console's dropdown has choices.
-      Ollama__Models: ${OLLAMA_MODELS:-qwen2.5:3b qwen2.5:1.5b}
+      Ollama__Models: ${OLLAMA_MODELS:-qwen2.5:3b qwen3:4b-instruct qwen2.5:1.5b}
       # Mirror of the GPU device handed to the ollama service below, so the status badge
       # can tell "no GPU attached" apart from "GPU attached but idle/forced-CPU".
       Ollama__GpuDevice: ${OLLAMA_GPU_DEVICE:-}
@@ -68,6 +68,11 @@ services:
       # Keep models loaded instead of unloading after ~5 idle minutes — reloading takes
       # upwards of a minute, which would otherwise hit the first message after any pause.
       # Override with e.g. "10m" if the (V)RAM should be freed when idle.
+      #
+      # This pins whichever model is in use, not every model that has ever answered: switching
+      # models in the console evicts the one being left behind first (ChatClientFactory), because
+      # two of these resident at once overflows a 6GB card and the newcomer silently runs half on
+      # the CPU.
       OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:--1}
     # GPU toggle. Compose can't conditionally attach a device, so the device to expose
     # comes from .env: leave OLLAMA_GPU_DEVICE unset for CPU (the default maps the
@@ -94,7 +99,7 @@ services:
     environment:
       # The ollama CLI talks to the server container instead of starting its own.
       OLLAMA_HOST: http://ollama:11434
-      OLLAMA_PULL_MODELS: ${OLLAMA_MODELS:-qwen2.5:3b qwen2.5:1.5b}
+      OLLAMA_PULL_MODELS: ${OLLAMA_MODELS:-qwen2.5:3b qwen3:4b-instruct qwen2.5:1.5b}
     restart: "no"
     # $$ so variables are resolved by the shell at runtime, not by compose. Each pull is
     # retried on failure (ollama resumes partial downloads, so retries are cheap) — a

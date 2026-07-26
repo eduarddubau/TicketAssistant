@@ -10,7 +10,7 @@
   align-items: center;
   gap: 1rem;
   padding: 0.7rem 1.15rem;
-  background: rgba(9, 11, 17, 0.55);
+  background: var(--glass);
   backdrop-filter: var(--blur);
   -webkit-backdrop-filter: var(--blur);
   border-bottom: 1px solid var(--border);
@@ -27,7 +27,7 @@
   border-radius: 11px;
   display: grid;
   place-items: center;
-  color: #fff;
+  color: var(--on-accent);
   background: var(--grad);
   box-shadow: var(--glow), inset 0 1px 0 rgba(255, 255, 255, 0.25);
 }
@@ -57,19 +57,20 @@
   display: flex; align-items: center; gap: 0.45rem;
   margin-left: 0.9rem; height: 34px; padding: 0 0.9rem; line-height: 1;
   border-radius: var(--r-full);
-  background: linear-gradient(135deg, rgba(124, 108, 255, 0.22), rgba(224, 92, 255, 0.16));
-  border: 1px solid rgba(150, 120, 255, 0.55);
-  color: #ded8ff;
+  background: var(--grad-soft);
+  border: 1px solid var(--accent-line);
+  color: var(--accent-fg);
   font-size: 0.79rem; font-weight: 600;
-  box-shadow: 0 4px 18px -8px rgba(124, 108, 255, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.09);
+  box-shadow: 0 4px 18px -8px color-mix(in srgb, var(--accent) 70%, transparent),
+              inset 0 1px 0 rgba(255, 255, 255, 0.09);
   transition: background 0.18s var(--ease), border-color 0.18s var(--ease),
               box-shadow 0.25s var(--ease), color 0.18s var(--ease), transform 0.15s var(--ease);
 }
 .new-chat:hover {
-  background: linear-gradient(135deg, rgba(124, 108, 255, 0.36), rgba(224, 92, 255, 0.28));
-  border-color: rgba(180, 150, 255, 0.85);
-  box-shadow: 0 8px 26px -8px rgba(124, 108, 255, 0.9), inset 0 1px 0 rgba(255, 255, 255, 0.14);
-  color: #fff;
+  background: linear-gradient(135deg, var(--accent-soft-2), color-mix(in srgb, var(--accent-2) 26%, transparent));
+  border-color: var(--accent-line-strong);
+  box-shadow: 0 8px 26px -8px color-mix(in srgb, var(--accent) 90%, transparent),
+              inset 0 1px 0 rgba(255, 255, 255, 0.14);
   transform: translateY(-1px);
 }
 .new-chat:active { transform: translateY(0); }
@@ -85,22 +86,21 @@ app-toolbar { flex: 1; min-width: 0; margin-left: 0.9rem; }
   padding: 0.7rem 0.95rem;
   border-radius: var(--r);
   background: var(--grad-soft);
-  border: 1px solid rgba(124, 108, 255, 0.32);
-  color: #ddd8ff;
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent);
+  color: var(--accent-fg);
   font-size: 0.85rem;
   animation: rise 0.4s var(--ease);
 }
 .dot-pulse {
   width: 8px; height: 8px; border-radius: 50%;
   background: var(--accent);
-  box-shadow: 0 0 0 0 rgba(124, 108, 255, 0.7);
   animation: pulse 1.8s infinite;
   flex-shrink: 0;
 }
 @keyframes pulse {
-  0% { box-shadow: 0 0 0 0 rgba(124, 108, 255, 0.55); }
-  70% { box-shadow: 0 0 0 8px rgba(124, 108, 255, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(124, 108, 255, 0); }
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 55%, transparent); }
+  70% { box-shadow: 0 0 0 8px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
 }
 
 .stage { flex: 1; min-height: 0; display: flex; }

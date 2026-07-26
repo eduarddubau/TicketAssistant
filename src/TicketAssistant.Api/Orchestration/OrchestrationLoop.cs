@@ -32,7 +32,8 @@ public sealed class OrchestrationLoop(
     ITicketProvider provider,
     UndoStore undo,
     ILogger<OrchestrationLoop> logger,
-    DebugTrace debug)
+    DebugTrace debug,
+    LanguageScope language)
 {
     // Same tools, indexed by name so we can look up the one the model asked for in O(1).
     private readonly Dictionary<string, AIFunction> _toolsByName = tools.ToDictionary(t => t.Name);
@@ -181,6 +182,11 @@ public sealed class OrchestrationLoop(
         List<ChatMessage> messages,
         [EnumeratorCancellation] CancellationToken ct)
     {
+        // The language is re-stamped onto the system message every turn rather than baked in when
+        // the conversation started: it can be switched mid-chat, and a conversation that keeps
+        // answering in the language it opened in would be the one place the switcher doesn't work.
+        ApplyLanguage(messages);
+
         // Tell the model which tools it may call this turn. The client is resolved per run so
         // the caller can switch provider/model between requests.
         var chatClient = chatClients.Resolve();
@@ -210,6 +216,10 @@ public sealed class OrchestrationLoop(
         // A model that answers with nothing gets one nudge, then a graceful apology.
         const int maxEmptyReplies = 2;
         var emptyReplies = 0;
+
+        // The last listing a read handed the model, kept so its answer can be checked against the
+        // data it was given. See the guard below.
+        TicketTools.Listing? lastListing = null;
 
         for (var turn = 0; ; turn++)
         {
@@ -431,6 +441,60 @@ public sealed class OrchestrationLoop(
                 yield return new OrchestrationEvent.AssistantText(
                     "Sorry — I lost my train of thought there. Could you say that again, or tell me what " +
                     "you'd like me to do next? I'm still here 🙂");
+                yield break;
+            }
+
+            // A read handed the model a listing and its answer doesn't account for every item in it.
+            // Measured on qwen2.5, that happens constantly and in three flavours: nothing from the
+            // data at all, the template from the instructions copied out as content ("- [Ticket 1
+            // Title]"), or — the quiet one — most of the items simply dropped, three of eight
+            // written out under a confident heading. All three look like a finished answer.
+            //
+            // The ids are what makes it checkable, which is why the listing carries them: an item
+            // the reply doesn't name is an item the user can neither see nor follow up. So a reply
+            // missing any of them is replaced with the listing rendered here, from the tool result,
+            // exactly as the instructions asked for it. Same reasoning as the filters being enforced
+            // in code rather than requested in a prompt: what an answer must contain is not
+            // something a 3B model can be trusted to remember.
+            //
+            // The cost is that a narrowing follow-up which re-reads ("which of these is urgent?")
+            // gets the full listing back rather than the model's summary of it. That is the right
+            // way round: a listing silently missing five of the user's tickets is a worse answer
+            // than a complete one. A read that came back empty sets nothing at all, so "nothing
+            // matched" still reaches the user in the model's own words.
+            var unlisted = calls.Count == 0 && lastListing is not null
+                ? lastListing.Ids.Where(id => !response.Text.Contains(id, StringComparison.OrdinalIgnoreCase)).ToList()
+                : [];
+
+            if (lastListing is { } checkable && unlisted.Count > 0)
+            {
+                logger.LogWarning(
+                    "Reply left out {Missing} of the {Total} item(s) the read returned — showing the listing instead: {Preview}",
+                    unlisted.Count, checkable.Ids.Count, Truncate(response.Text, 120));
+
+                if (debug.Enabled)
+                {
+                    yield return DebugEvents.Guardrail(
+                        $"the reply named {checkable.Ids.Count - unlisted.Count} of the {checkable.Ids.Count} " +
+                        "item(s) it was given — showing the listing from the tool result instead",
+                        new JsonObject
+                        {
+                            ["itemsReturned"] = checkable.Ids.Count,
+                            ["idsLeftOut"] = DebugEvents.Value(unlisted),
+                            ["replyText"] = response.Text,
+                            ["shownInstead"] = checkable.Markdown
+                        });
+                }
+
+                // What the user saw is what the model should remember saying — otherwise the next
+                // turn reasons from an invention that was never on screen.
+                messages.Add(new ChatMessage(ChatRole.Assistant, checkable.Markdown));
+
+                // Rewrite the bubble when prose already streamed into it; otherwise send it whole.
+                yield return streamedText
+                    ? new OrchestrationEvent.AssistantReplace(checkable.Markdown)
+                    : new OrchestrationEvent.AssistantText(checkable.Markdown);
+
                 yield break;
             }
 
@@ -688,6 +752,13 @@ public sealed class OrchestrationLoop(
                 {
                     yield return DebugEvents.ToolResult(
                         call.Name, call.CallId, result, !failed, toolStopwatch.ElapsedMilliseconds);
+                }
+
+                // Remember what a read actually returned, so the answer built on it can be checked
+                // against it. Only listings have anything to check — everything else leaves this null.
+                if (TicketTools.AsListing(result) is { } listing)
+                {
+                    lastListing = listing;
                 }
 
                 messages.Add(new ChatMessage(ChatRole.Tool, [new FunctionResultContent(call.CallId, result)]));
@@ -1090,6 +1161,26 @@ public sealed class OrchestrationLoop(
     /// thrown, so one failed tool call turns into feedback for the model instead of crashing
     /// the whole turn.
     /// </summary>
+    /// <summary>
+    /// Rewrites the conversation's system message so it carries this request's language. Rewriting
+    /// rather than appending keeps the history to one system message: appending a second one every
+    /// turn would grow the context without end, and each would contradict the last as soon as
+    /// someone switched language.
+    /// </summary>
+    private void ApplyLanguage(List<ChatMessage> messages)
+    {
+        if (messages.Count == 0 || messages[0].Role != ChatRole.System)
+        {
+            return;
+        }
+
+        var wanted = ConversationStore.SystemPrompt + language.PromptInstruction;
+        if (messages[0].Text != wanted)
+        {
+            messages[0] = new ChatMessage(ChatRole.System, wanted);
+        }
+    }
+
     private static async Task<object?> InvokeToolAsync(AIFunction tool, FunctionCallContent call, CancellationToken ct)
     {
         try

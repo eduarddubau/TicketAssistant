@@ -179,8 +179,20 @@ Both filters are enforced by the API rather than asked of the model, so they hol
 
 | *status badge* | Where the loaded model is **actually** running, straight from Ollama's own report: `GPU`, `CPU`, a split when the model doesn't fully fit in VRAM, or idle — and `GPU off` when the machine has an NVIDIA GPU the container isn't using. |
 | **User** | Who you are on the mock board — it scopes tickets to what you raised or were assigned. `alice` and `bob` each own seeded work; `charlie` owns none, so reads come only from your connected accounts (Jira on its own); `admin` is the board's reserved name and sees all of it. |
+| **Theme** | Light or dark, in one click. Untouched, it follows the OS — including live, if the OS flips at sunset. |
+| **Scheme** | The accent colour: violet, indigo, emerald, rose or slate. Every scheme is defined in both themes, so the two choices are independent. |
+| **Language** | English, Romanian or German. It follows the browser's language until you pick one, and it moves the assistant too — the replies, the opening greeting and the words a listing is built from all arrive in it. |
 | **Debug** | Opens the debug console (below). Also `Ctrl` + `` ` ``. |
 | **Connect Jira** | Logs *you* into *your own* Jira through an OAuth popup (shown only when the Jira backend is enabled). |
+
+Theme, scheme and language are the exceptions to "next message": they apply at once and live in the
+browser. Theme and scheme are never sent anywhere and are re-applied before the first paint of a
+reload, so nothing flashes; the language rides on a header so the assistant answers in it.
+
+What stays in English whatever you pick: ticket ids, project keys, statuses and priorities (they are
+identifiers — translating them would stop them matching your board), the item-type names the
+backends define (`Bug`, `Story`), ticket titles, and the debug console, whose content is a
+server-side trace that arrives in English regardless.
 
 ### The debug console
 
@@ -229,7 +241,7 @@ Set via `appsettings.json`, environment variables, or `.env` (copy from `.env.ex
 | Setting | Purpose | Default |
 | --- | --- | --- |
 | `Llm:Provider` | `Ollama` \| `Anthropic` \| `OpenAI` \| `Google` | `Ollama` |
-| `Ollama:Models` | Space-separated local models (tool-calling capable): the **first is the default**, all are auto-downloaded and offered in the console's dropdown | `qwen2.5:3b qwen2.5:1.5b` |
+| `Ollama:Models` | Space-separated local models (tool-calling capable): the **first is the default**, all are auto-downloaded and offered in the console's dropdown | `qwen2.5:3b qwen3:4b-instruct qwen2.5:1.5b` |
 | `Anthropic:ApiKey` (or `OpenAI:` / `Google:`) | Key for the chosen hosted provider | — |
 | `Anthropic:Model` (or `OpenAI:` / `Google:`) | Model for that provider | `claude-sonnet-5` / `gpt-4o-mini` / `gemini-flash-latest` |
 | `Tickets:Backends` | Which backends run **together** (space/comma separated): `Http` (the mock) · `Jira` · `InMemory`, e.g. `Http Jira` | `Http` |
@@ -237,11 +249,18 @@ Set via `appsettings.json`, environment variables, or `.env` (copy from `.env.ex
 | `Atlassian:RedirectUri` / `:FrontendOrigin` | OAuth callback URL and the console's origin | `…:5080/api/auth/jira/callback` / `…:4200` |
 | `Tickets:Jira:ProjectKey` | *Optional* default project for new tickets (otherwise chosen per ticket in the UI); also `:IssueType` (kind used when a create doesn't name one) / `:ScopeToCurrentUser` | — |
 | `OLLAMA_GPU_DEVICE` (`.env`, compose only) | Device handed to the Ollama container; the up scripts set it automatically | empty = CPU |
-| `OLLAMA_KEEP_ALIVE` (`.env`, compose only) | How long a model stays loaded when idle; `-1` never unloads it, so no message ever pays the ~1 min reload | `-1` |
+| `OLLAMA_KEEP_ALIVE` (`.env`, compose only) | How long the model in use stays loaded when idle; `-1` never unloads it, so no message ever pays the ~1 min reload. Switching models unloads the one being left behind, so only one is ever resident | `-1` |
 
-Only Ollama runs with no API key. `qwen2.5:7b` is a heavier local alternative with stronger
-multi-step tool calling. Everything here is a default — the console's switchers override the
-provider, model, and GPU/CPU choice per request without touching configuration.
+Only Ollama runs with no API key. Everything here is a default — the console's switchers override
+the provider, model, and GPU/CPU choice per request without touching configuration.
+
+The three local models are not interchangeable, which is why the picker labels them: `qwen2.5:3b`
+is the default, `qwen3:4b-instruct` asks for the right read the most consistently, and
+`qwen2.5:1.5b` is kept as the weak-model test case — it answers *without reading anything* about
+half the time. That last one is the reason the loop checks an answer against the data behind it:
+a read that returned eight tickets and a reply that names none of them is not an answer, so the
+listing is rendered from the tool result instead. `qwen2.5:7b` is a heavier alternative, but at
+~4.7 GB resident it overflows a 6 GB card.
 
 <details>
 <summary><b>Connecting a real Jira</b> — Jira Cloud, per-user OAuth</summary>

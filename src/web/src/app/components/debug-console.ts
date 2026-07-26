@@ -190,7 +190,7 @@ const STAGE_LABELS: Record<string, string> = {
     :host {
       display: flex; flex-direction: column; min-height: 0; flex-shrink: 0;
       border-left: 1px solid var(--border);
-      background: rgba(7, 8, 12, 0.82);
+      background: var(--panel);
       backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
       font-size: 0.78rem;
       position: relative;
@@ -200,7 +200,7 @@ const STAGE_LABELS: Record<string, string> = {
     /* Drag anywhere on the seam to widen the panel — a debug console is only as useful as the
        amount of JSON it can show at once. */
     .grip { position: absolute; left: -3px; top: 0; bottom: 0; width: 7px; cursor: col-resize; z-index: 5; }
-    .grip:hover { background: linear-gradient(90deg, transparent, rgba(124, 108, 255, 0.5), transparent); }
+    .grip:hover { background: linear-gradient(90deg, transparent, var(--accent-line), transparent); }
 
     .head { display: flex; align-items: center; gap: 0.5rem; padding: 0.6rem 0.75rem; border-bottom: 1px solid var(--border); }
     .head h2 { margin: 0; font-size: 0.8rem; font-weight: 700; letter-spacing: 0.01em; }
@@ -222,7 +222,7 @@ const STAGE_LABELS: Record<string, string> = {
       flex: 1; min-width: 0; padding: 0.35rem 0.6rem; border-radius: var(--r-full);
       background: var(--surface); border: 1px solid var(--border); color: var(--text); font-size: 0.74rem;
     }
-    .search:focus { outline: none; border-color: rgba(124, 108, 255, 0.5); }
+    .search:focus { outline: none; border-color: var(--accent-line); }
     .follow { display: flex; align-items: center; gap: 0.3rem; color: var(--text-dim); font-size: 0.7rem; white-space: nowrap; }
     .follow input { accent-color: var(--accent); }
 
@@ -241,39 +241,43 @@ const STAGE_LABELS: Record<string, string> = {
     .empty { color: var(--text-faint); font-size: 0.74rem; padding: 1.2rem 0.6rem; text-align: center; line-height: 1.6; }
 
     .entry { border-radius: var(--r-sm); margin-bottom: 2px; border-left: 2px solid transparent; }
-    .entry:hover { background: rgba(255, 255, 255, 0.03); }
-    .entry.open { background: rgba(255, 255, 255, 0.04); }
+    .entry:hover { background: var(--hover); }
+    .entry.open { background: var(--hover-2); }
 
     /* The stage's colour is the panel's index: the same hue on the chip, the left edge, and the
        tag, so a turn's shape is readable by colour alone before reading a word of it. */
-    .entry.llm_request { border-left-color: #6a8bff; }
-    .entry.llm_response { border-left-color: #38e1ff; }
-    .entry.tool_call { border-left-color: #c084fc; }
-    .entry.tool_result { border-left-color: #34d399; }
-    .entry.guardrail { border-left-color: #f59e0b; }
-    .entry.confirmation { border-left-color: #f472b6; }
-    .entry.undo { border-left-color: #a3a3a3; }
-    .entry.user_prompt { border-left-color: #e05cff; }
-    .entry.system_prompt { border-left-color: #7c6bff; }
-    .entry.error { border-left-color: #f43f5e; }
-    .entry.llm { border-left-color: #38bdf8; }
-    .entry.connection { border-left-color: #34d399; }
-    .entry.filter { border-left-color: #fb923c; }
-    .entry.settings { border-left-color: #94a3b8; }
+    /* The hues are the app's category index rather than its accent scheme, so they stay put when the
+       scheme changes: "purple means a tool call" would stop meaning anything if choosing the emerald
+       scheme turned half the panel green. Each has a mark for the edge and a -fg for the text, since
+       what reads on a dark panel and what reads on a light one are not the same colour. */
+    .entry.llm_request { border-left-color: var(--h-blue); }
+    .entry.llm_response { border-left-color: var(--h-cyan); }
+    .entry.tool_call { border-left-color: var(--h-purple); }
+    .entry.tool_result { border-left-color: var(--h-green); }
+    .entry.guardrail { border-left-color: var(--h-amber); }
+    .entry.confirmation { border-left-color: var(--h-pink); }
+    .entry.undo { border-left-color: var(--h-gray); }
+    .entry.user_prompt { border-left-color: var(--h-magenta); }
+    .entry.system_prompt { border-left-color: var(--h-violet); }
+    .entry.error { border-left-color: var(--h-red); }
+    .entry.llm { border-left-color: var(--h-sky); }
+    .entry.connection { border-left-color: var(--h-green); }
+    .entry.filter { border-left-color: var(--h-orange); }
+    .entry.settings { border-left-color: var(--h-gray); }
 
-    .chip.llm_request, .entry.llm_request .tag { color: #9fb4ff; }
-    .chip.llm_response, .entry.llm_response .tag { color: #7fe4ff; }
-    .chip.tool_call, .entry.tool_call .tag { color: #d8b4fe; }
-    .chip.tool_result, .entry.tool_result .tag { color: #7ff0c4; }
-    .chip.guardrail, .entry.guardrail .tag { color: #fcd34d; }
-    .chip.confirmation, .entry.confirmation .tag { color: #f9a8d4; }
-    .chip.user_prompt, .entry.user_prompt .tag { color: #f0abfc; }
-    .chip.system_prompt, .entry.system_prompt .tag { color: #b9aeff; }
-    .chip.error, .entry.error .tag { color: #ffb0b0; }
-    .chip.llm, .entry.llm .tag { color: #7dd3fc; }
-    .chip.connection, .entry.connection .tag { color: #7ff0c4; }
-    .chip.filter, .entry.filter .tag { color: #fdba74; }
-    .chip.settings, .entry.settings .tag { color: #cbd5e1; }
+    .chip.llm_request, .entry.llm_request .tag { color: var(--h-blue-fg); }
+    .chip.llm_response, .entry.llm_response .tag { color: var(--h-cyan-fg); }
+    .chip.tool_call, .entry.tool_call .tag { color: var(--h-purple-fg); }
+    .chip.tool_result, .entry.tool_result .tag { color: var(--h-green-fg); }
+    .chip.guardrail, .entry.guardrail .tag { color: var(--h-amber-fg); }
+    .chip.confirmation, .entry.confirmation .tag { color: var(--h-pink-fg); }
+    .chip.user_prompt, .entry.user_prompt .tag { color: var(--h-magenta-fg); }
+    .chip.system_prompt, .entry.system_prompt .tag { color: var(--h-violet-fg); }
+    .chip.error, .entry.error .tag { color: var(--h-red-fg); }
+    .chip.llm, .entry.llm .tag { color: var(--h-sky-fg); }
+    .chip.connection, .entry.connection .tag { color: var(--h-green-fg); }
+    .chip.filter, .entry.filter .tag { color: var(--h-orange-fg); }
+    .chip.settings, .entry.settings .tag { color: var(--h-gray-fg); }
 
     .row {
       display: flex; align-items: baseline; gap: 0.4rem; width: 100%; text-align: left;
@@ -284,12 +288,12 @@ const STAGE_LABELS: Record<string, string> = {
     .time { color: var(--text-faint); font-variant-numeric: tabular-nums; flex-shrink: 0; }
     /* Fixed width so the numbers line up into a column that can be scanned for the slow step. */
     .gap { color: var(--text-faint); font-variant-numeric: tabular-nums; flex-shrink: 0; width: 4.2rem; text-align: right; }
-    .entry.slow .gap { color: #fcd34d; font-weight: 600; }
+    .entry.slow .gap { color: var(--h-amber-fg); font-weight: 600; }
     .src {
       flex-shrink: 0; font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
       padding: 0 0.28rem; border-radius: 4px; background: var(--surface-2); color: var(--text-faint);
     }
-    .src.server { background: rgba(124, 108, 255, 0.18); color: #b9aeff; }
+    .src.server { background: var(--accent-soft); color: var(--accent-fg); }
     .tag { flex-shrink: 0; font-weight: 600; }
     .label { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
     .entry.open .label { white-space: normal; overflow: visible; }
@@ -297,36 +301,36 @@ const STAGE_LABELS: Record<string, string> = {
 
     .detail { padding: 0.25rem 0.5rem 0.6rem 1.1rem; display: flex; flex-direction: column; gap: 0.5rem; }
 
-    .sec { border: 1px solid var(--border); border-radius: var(--r-sm); padding: 0.45rem 0.55rem; background: rgba(0, 0, 0, 0.25); }
+    .sec { border: 1px solid var(--border); border-radius: var(--r-sm); padding: 0.45rem 0.55rem; background: var(--inset); }
     .sec-h, summary { font-size: 0.68rem; font-weight: 700; color: var(--text-dim); letter-spacing: 0.03em; text-transform: uppercase; }
     summary { cursor: pointer; }
     summary:hover { color: var(--text); }
 
     .msg { border-left: 2px solid var(--border-strong); padding-left: 0.5rem; margin-top: 0.45rem; }
-    .msg.system { border-left-color: #7c6bff; }
-    .msg.user { border-left-color: #e05cff; }
-    .msg.assistant { border-left-color: #38e1ff; }
-    .msg.tool { border-left-color: #34d399; }
+    .msg.system { border-left-color: var(--h-violet); }
+    .msg.user { border-left-color: var(--h-magenta); }
+    .msg.assistant { border-left-color: var(--h-cyan); }
+    .msg.tool { border-left-color: var(--h-green); }
     .msg-h { display: flex; align-items: baseline; gap: 0.4rem; font-size: 0.66rem; }
     .msg-h .role { font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-dim); }
     .msg-h .who, .msg-h .len { color: var(--text-faint); }
 
     .part { margin-top: 0.35rem; }
     .part-h { font-size: 0.67rem; color: var(--text-dim); }
-    .part-h b { color: #d8b4fe; }
+    .part-h b { color: var(--h-purple-fg); }
     .cid { color: var(--text-faint); }
 
     .tool { margin-top: 0.5rem; }
     .tool-h { display: flex; align-items: center; gap: 0.4rem; font-size: 0.72rem; }
-    .tool-h b { color: #d8b4fe; }
-    .warn { font-size: 0.6rem; font-weight: 700; color: #fcd34d; }
+    .tool-h b { color: var(--h-purple-fg); }
+    .warn { font-size: 0.6rem; font-weight: 700; color: var(--h-amber-fg); }
     .tool-d { margin: 0.15rem 0 0.25rem; color: var(--text-dim); font-size: 0.7rem; line-height: 1.5; }
 
     /* Payloads keep their newlines and their indentation — a system prompt read as one wrapped
        blob is a system prompt nobody checks. Long lines scroll rather than reflow. */
     pre {
       margin: 0.3rem 0 0; padding: 0.45rem 0.55rem; border-radius: var(--r-sm);
-      background: rgba(0, 0, 0, 0.4); border: 1px solid var(--border);
+      background: var(--inset-strong); border: 1px solid var(--border);
       font-family: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
       font-size: 0.7rem; line-height: 1.55; color: var(--text-dim);
       max-height: 22rem; overflow: auto; white-space: pre-wrap; word-break: break-word;
@@ -335,10 +339,10 @@ const STAGE_LABELS: Record<string, string> = {
 
     /* The coloured spans are written into the payload with [innerHTML], so they never carry the
        component's scoping attribute — ::ng-deep is what lets these rules reach them. */
-    :host ::ng-deep .json .k { color: #9fb4ff; }
-    :host ::ng-deep .json .s { color: #7ff0c4; }
-    :host ::ng-deep .json .n { color: #fcd34d; }
-    :host ::ng-deep .json .b { color: #f9a8d4; }
+    :host ::ng-deep .json .k { color: var(--h-blue-fg); }
+    :host ::ng-deep .json .s { color: var(--h-green-fg); }
+    :host ::ng-deep .json .n { color: var(--h-amber-fg); }
+    :host ::ng-deep .json .b { color: var(--h-pink-fg); }
   `],
 })
 export class DebugConsole {

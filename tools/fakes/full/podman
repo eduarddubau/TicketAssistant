@@ -4,6 +4,7 @@
 # Tunable by the test:
 #   FAKE_DEVICES    devices the ollama container was created with (default: an NVIDIA set)
 #   FAKE_KEEPALIVE  the container's OLLAMA_KEEP_ALIVE (default: -1)
+#   FAKE_MODELS     the api container's Ollama__Models (default: today's lineup)
 #   FAKE_PROCESSOR  what `ollama ps` reports (default: 100% GPU)
 #   FAKE_PULL_EXIT  exit code of the one-shot model puller (default: 0)
 case "$1 $2" in
@@ -26,7 +27,10 @@ case "$1" in
     case "$*" in
       *State.ExitCode*)     echo "${FAKE_PULL_EXIT:-0}" ;;
       *HostConfig.Devices*) echo "${FAKE_DEVICES:-/dev/nvidia-uvm /dev/nvidiactl /dev/nvidia0 }" ;;
-      *Config.Env*)         printf 'OLLAMA_HOST=0.0.0.0:11434\nOLLAMA_KEEP_ALIVE=%s\n' "${FAKE_KEEPALIVE:--1}" ;;
+      # Both containers' environments in one reply — the script picks out the variable it asked
+      # about, and no test needs them told apart.
+      *Config.Env*)         printf 'OLLAMA_HOST=0.0.0.0:11434\nOLLAMA_KEEP_ALIVE=%s\nOllama__Models=%s\n' \
+                              "${FAKE_KEEPALIVE:--1}" "${FAKE_MODELS:-qwen2.5:3b qwen3:4b-instruct qwen2.5:1.5b}" ;;
     esac
     ;;
   exec)

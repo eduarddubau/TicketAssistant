@@ -9,6 +9,7 @@ import { ProjectsService } from './services/projects.service';
 import { ApiService } from './services/api.service';
 import { DebugService } from './services/debug.service';
 import { KindsService } from './services/kinds.service';
+import { I18nService } from './services/i18n.service';
 import { ConversationInfo } from './models';
 
 @Component({
@@ -25,6 +26,7 @@ export class App implements OnInit {
   private readonly projects = inject(ProjectsService);
   readonly jira = inject(JiraService);
   readonly debug = inject(DebugService);
+  readonly i18n = inject(I18nService);
   private readonly kinds = inject(KindsService);
 
   readonly conversation = signal<ConversationInfo | null>(null);
@@ -33,12 +35,20 @@ export class App implements OnInit {
     // Opening the panel — at startup or halfway through a chat — pulls in the system prompt so
     // the trace starts with the instructions everything else is a reaction to, plus a line saying
     // where the settings currently stand.
+    // Opening the panel is the only thing this effect reacts to, so `enabled` is the only signal
+    // read inside its tracking context. Everything else it does is untracked, and that is load
+    // bearing rather than tidiness: both calls below *write* the trace, and traceSystemPrompt also
+    // reads it (to check the prompt isn't already there). Tracked, that read makes the effect
+    // depend on the very signal it goes on to write — it re-runs, writes, re-runs, and the tab
+    // spins at 100% of a core before Angular has finished its first render, so the page never
+    // appears at all. With the panel switched off nothing writes, which is why it only ever
+    // showed up for someone who had opened the console once and had it remembered.
     effect(() => {
       if (!this.debug.enabled()) return;
-      void this.api.traceSystemPrompt();
-      // untracked: this reads the model/connection/filter signals, and the effect must fire when
-      // the panel opens — not again every time one of them changes (they trace themselves).
-      untracked(() => this.traceSettings());
+      untracked(() => {
+        void this.api.traceSystemPrompt();
+        this.traceSettings();
+      });
     });
   }
 

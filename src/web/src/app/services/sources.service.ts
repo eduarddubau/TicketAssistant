@@ -2,6 +2,7 @@ import { Injectable, computed, inject, signal } from '@angular/core';
 import { providerLabel } from '../models';
 import { DebugService } from './debug.service';
 import { ProjectsService } from './projects.service';
+import { I18nService } from './i18n.service';
 
 const STORAGE_KEY = 'ta-sources';
 
@@ -18,6 +19,7 @@ const STORAGE_KEY = 'ta-sources';
 export class SourcesService {
   private readonly projects = inject(ProjectsService);
   private readonly debug = inject(DebugService);
+  private readonly i18n = inject(I18nService);
 
   readonly selected = signal<ReadonlySet<string>>(load());
 
@@ -39,8 +41,9 @@ export class SourcesService {
   /** What the pill says: the filter at a glance, without opening it. */
   readonly summary = computed(() => {
     const on = this.active();
-    if (!on.length) return 'All sources';
-    return on.length === 1 ? providerLabel(on[0]) : `${on.length} sources`;
+    if (!on.length) return this.i18n.t('toolbar.sources.all');
+    // Backend names are what those systems are called, so they stay put; the counting word doesn't.
+    return on.length === 1 ? providerLabel(on[0]) : this.i18n.t('toolbar.sources.count', { count: on.length });
   });
 
   /** Per-request header for the chat/confirm calls; absent when nothing is filtered. */

@@ -135,65 +135,16 @@ public sealed class ConversationStore
         """;
 
     /// <summary>
-    /// The opening messages shown to the user before they type anything. Each one follows the
+    /// The opening message shown to the user before they type anything. Each one follows the
     /// same shape, which is what makes an opener useful rather than merely welcoming: say who
     /// the assistant is, name what it can concretely do, promise that nothing changes without
     /// approval, and close with a direct instruction so the user knows what to type. Warmth
     /// alone leaves people staring at an empty box.
     ///
     /// Deliberately fixed text rather than model-generated — it appears instantly and can't
-    /// invent features that don't exist. Several variants exist so the app doesn't feel like
-    /// a recording; <see cref="Create"/> rotates through them.
+    /// invent features that don't exist. The variants (and their translations) live in
+    /// <see cref="Orchestration.Greetings"/>; <see cref="Create"/> rotates through them.
     /// </summary>
-    public static readonly string[] Greetings =
-    [
-        """
-        I'm your ticketing assistant 🧯
-
-        Describe a problem in plain words — "the printer on 3 keeps jamming" is plenty — and
-        I'll write it up as a proper ticket. I can also tell you where your existing tickets
-        stand, and update, comment on, reassign, reschedule, or close them.
-
-        Nothing changes without your approval: I show you every action first, and "undo that"
-        reverses it.
-
-        **Go ahead — what's the problem?** Or ask *"how are my tickets doing?"* to take stock.
-        """,
-
-        """
-        Ticketing assistant here 🧭
-
-        Two things I'm useful for: turning a plain-language complaint into a filled-in ticket,
-        and keeping track of the ones you already have — status, comments, owners, due dates,
-        and anything that's slipped past its deadline.
-
-        You approve every change before it happens, so nothing here is risky to try.
-
-        **Tell me what's broken**, or say *"what's outstanding?"* for an overview.
-        """,
-
-        """
-        I file and follow up on tickets for you 🫡
-
-        No forms to fill in — just say what's wrong and I'll sort out the title, description,
-        and priority, then check it with you before anything is created. Already have tickets?
-        I can summarize them, chase them, comment, reassign, or close them out.
-
-        **Start by describing the issue** — or ask *"anything overdue?"* if you'd rather review
-        first.
-        """,
-
-        """
-        Your ticketing assistant, ready when you are 🛠️
-
-        Say what's gone wrong and I'll open a ticket for it. Say a ticket's name or number and
-        I'll tell you where it stands, or change its status, owner, deadline, or notes.
-
-        Every change is shown to you for a yes before it lands, and "undo that" always works.
-
-        **What do you need — a new ticket, or a look at the current ones?**
-        """
-    ];
 
     // Thread-safe map of conversation id -> its list of messages (system, user, assistant,
     // tool). ConcurrentDictionary because multiple requests may touch the store at once.
@@ -210,11 +161,16 @@ public sealed class ConversationStore
     /// assistant's opening turn, so the model knows it has already introduced itself and
     /// doesn't repeat it). Returns both the id and the chosen greeting, so the caller shows
     /// the user exactly the text the model believes it opened with.
+    ///
+    /// The greeting is in <paramref name="languageTag"/>'s language, which is doing more work
+    /// than being polite: it is the assistant's own first turn, so it is what the model imitates.
+    /// An English opener under an instruction to answer in Romanian gets English answers.
     /// </summary>
-    public (Guid Id, string Greeting) Create()
+    public (Guid Id, string Greeting) Create(string languageTag = "en")
     {
-        var greeting = Greetings[
-            (int)((uint)Interlocked.Increment(ref _greetingCounter) % Greetings.Length)];
+        var greetings = Greetings.For(languageTag);
+        var greeting = greetings[
+            (int)((uint)Interlocked.Increment(ref _greetingCounter) % greetings.Count)];
 
         var id = Guid.NewGuid();
         _conversations[id] =

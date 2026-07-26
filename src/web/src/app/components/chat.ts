@@ -1,7 +1,8 @@
-import { Component, Input, OnDestroy, OnInit, inject, signal } from '@angular/core';
+import { Component, Input, OnDestroy, OnInit, computed, inject, signal } from '@angular/core';
 import { ApiService } from '../services/api.service';
 import { ProjectsService } from '../services/projects.service';
 import { DebugService } from '../services/debug.service';
+import { I18nService } from '../services/i18n.service';
 import { ConversationInfo, JiraProject, OrchestrationEvent } from '../models';
 import { renderMarkdown } from '../markdown';
 import { ConfirmationCard, Decision } from './confirmation-card';
@@ -71,7 +72,7 @@ type LogItem =
       <div class="col">
         @if (!started()) {
           <div class="suggestions">
-            @for (s of suggestions; track s) {
+            @for (s of suggestions(); track s) {
               <button class="chip" (click)="useSuggestion(s)">{{ s }}</button>
             }
           </div>
@@ -79,8 +80,9 @@ type LogItem =
         <form class="composer" (submit)="send($event)">
           <input [value]="draft()" (input)="draft.set($any($event.target).value)"
                  [disabled]="busy()"
-                 placeholder="Describe an issue, or ask about your tickets…" />
-          <button class="send" type="submit" [disabled]="busy() || !draft().trim()" aria-label="Send">
+                 [placeholder]="i18n.t('chat.placeholder')" />
+          <button class="send" type="submit" [disabled]="busy() || !draft().trim()"
+                  [attr.aria-label]="i18n.t('chat.send')">
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M5 12h14M13 6l6 6-6 6"/>
             </svg>
@@ -106,7 +108,7 @@ type LogItem =
       background: var(--grad); box-shadow: var(--glow);
     }
     .avatar::after {
-      content: ''; width: 15px; height: 15px; background: #fff;
+      content: ''; width: 15px; height: 15px; background: var(--on-accent);
       -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 2c.5 4.6 2.6 6.7 8 8-5.4 1.3-7.5 3.4-8 8-.5-4.6-2.6-6.7-8-8 5.4-1.3 7.5-3.4 8-8z'/%3E%3C/svg%3E") center/contain no-repeat;
       mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 2c.5 4.6 2.6 6.7 8 8-5.4 1.3-7.5 3.4-8 8-.5-4.6-2.6-6.7-8-8 5.4-1.3 7.5-3.4 8-8z'/%3E%3C/svg%3E") center/contain no-repeat;
     }
@@ -141,7 +143,7 @@ type LogItem =
     }
     .ring i {
       position: absolute; inset: 0; --sweep: 0deg;
-      background: conic-gradient(from var(--sweep), #4f8bff, #9b5cff, #ff5ca8, #38e1ff, #4f8bff);
+      background: conic-gradient(from var(--sweep), var(--accent-3), var(--accent), var(--accent-2), var(--accent-3));
       animation: glow-sweep 6s steps(180, end) infinite;   /* idle: clearly alive, just unhurried */
     }
     .ring.hot { opacity: 1; }
@@ -162,19 +164,19 @@ type LogItem =
        while a reply is being written. */
     .inner i {
       position: absolute; inset: -25%; --sweep: 0deg;
-      background: conic-gradient(from var(--sweep), #4f8bff, #9b5cff, #ff5ca8, #38e1ff, #4f8bff);
+      background: conic-gradient(from var(--sweep), var(--accent-3), var(--accent), var(--accent-2), var(--accent-3));
       filter: blur(22px);
       animation: glow-sweep 4s steps(60, end) infinite reverse;
     }
 
     .bubble.assistant {
       position: relative; z-index: 1; border-radius: 18px;
-      background: rgba(17, 19, 27, 0.86);
+      background: var(--bubble);
       backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
       box-shadow: var(--shadow);
     }
     /* Let the interior glow read through while the reply is being written. */
-    .bubble.assistant.streaming, .bubble.assistant.thinking { background: rgba(17, 19, 27, 0.72); }
+    .bubble.assistant.streaming, .bubble.assistant.thinking { background: var(--bubble-soft); }
 
     /* Motion off: the border keeps its colours, nothing turns. */
     @media (prefers-reduced-motion: reduce) {
@@ -186,9 +188,12 @@ type LogItem =
     /* No border here — the user's bubble is lit from within instead: the gradient fill drifts
        across it while the glow underneath breathes, so it feels alive without competing with the
        assistant's travelling border. */
+    /* Filled with the accent scheme, in both themes: the reader's own words are the one thing that
+       should look the same whichever way round the room is. Which is why the whites inside it below
+       are literal — they sit on the gradient, not on the page. */
     .bubble.user {
-      position: relative; z-index: 1; color: #fff;
-      background: linear-gradient(115deg, #5b5cff, #8b5cff, #e05cff, #8b5cff, #5b5cff);
+      position: relative; z-index: 1; color: var(--on-accent);
+      background: var(--grad-user);
       background-size: 300% 100%;
       border-radius: 18px; border-top-right-radius: 6px;
       animation: user-flow 14s linear infinite, user-glow 6s ease-in-out infinite;
@@ -209,19 +214,19 @@ type LogItem =
     .bubble.user hr { border-top-color: rgba(255, 255, 255, 0.35); }
     .bubble > :first-child { margin-top: 0; }
     .bubble > :last-child { margin-bottom: 0; }
-    .bubble a { color: #cdc6ff; text-decoration: underline; text-underline-offset: 2px; }
+    .bubble a { color: var(--accent-fg); text-decoration: underline; text-underline-offset: 2px; }
     .bubble.user a { color: #fff; }
     /* Badge naming the system a ticket lives in, so provider/project is visible even when the
        model doesn't say it. */
     .bubble .src {
       display: inline-block; margin-left: 0.3rem; padding: 0.02rem 0.36rem;
       border-radius: var(--r-full); font-size: 0.68em; font-weight: 600; white-space: nowrap;
-      background: rgba(255, 255, 255, 0.1); border: 1px solid var(--border);
+      background: var(--surface-2); border: 1px solid var(--border);
       color: var(--text-dim); vertical-align: 1px;
     }
     .bubble.user .src { background: rgba(255, 255, 255, 0.22); color: #fff; border-color: transparent; }
 
-    .bubble code { background: rgba(255, 255, 255, 0.1); padding: 0.1rem 0.34rem; border-radius: 5px; font-size: 0.85em; }
+    .bubble code { background: var(--surface-2); padding: 0.1rem 0.34rem; border-radius: 5px; font-size: 0.85em; }
     .bubble.user code { background: rgba(255, 255, 255, 0.2); }
 
     .thinking { display: flex; gap: 5px; align-items: center; padding: 0.85rem 1rem; }
@@ -233,7 +238,7 @@ type LogItem =
       animation: rise 0.3s var(--ease); font-weight: 500;
     }
     .note.tool { background: var(--surface); border: 1px solid var(--border); color: var(--text-dim); }
-    .note.error { background: rgba(244, 63, 94, 0.12); border: 1px solid rgba(244, 63, 94, 0.3); color: #ffb0b0; }
+    .note.error { background: var(--danger-soft); border: 1px solid var(--danger-line); color: var(--danger-fg); }
 
     app-confirmation-card { display: block; flex: 1; min-width: 0; max-width: 82%; animation: rise 0.35s var(--ease); }
 
@@ -260,14 +265,14 @@ type LogItem =
       background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-full);
       box-shadow: var(--shadow-lg); transition: border-color 0.2s var(--ease), box-shadow 0.2s var(--ease);
     }
-    .composer:focus-within { border-color: rgba(124, 108, 255, 0.5); box-shadow: var(--shadow-lg), 0 0 0 4px rgba(124, 108, 255, 0.12); }
+    .composer:focus-within { border-color: var(--accent-line); box-shadow: var(--shadow-lg), 0 0 0 4px var(--accent-ring); }
     .composer input { flex: 1; background: transparent; border: 0; color: var(--text); font-size: 0.92rem; padding: 0.55rem 0; }
     .composer input:focus { outline: none; }
     .composer input::placeholder { color: var(--text-faint); }
 
     .send {
       width: 40px; height: 40px; flex-shrink: 0; border: 0; border-radius: 50%;
-      display: grid; place-items: center; color: #fff;
+      display: grid; place-items: center; color: var(--on-accent);
       background: var(--grad); box-shadow: var(--glow);
       transition: transform 0.15s var(--ease), filter 0.2s var(--ease);
     }
@@ -282,6 +287,7 @@ export class Chat implements OnInit, OnDestroy {
   private readonly api = inject(ApiService);
   private readonly projectsSvc = inject(ProjectsService);
   private readonly debug = inject(DebugService);
+  readonly i18n = inject(I18nService);
 
   readonly log = signal<LogItem[]>([]);
   readonly streaming = signal<string | null>(null);
@@ -290,12 +296,14 @@ export class Chat implements OnInit, OnDestroy {
   readonly draft = signal('');
   readonly started = signal(false);
 
-  readonly suggestions = [
-    'Show me my open tickets',
-    'What tasks do I have?',
-    'Create a ticket',
-    'Open a task for me',
-  ];
+  // Computed rather than a constant: these are what the user is about to *say*, so they have to be
+  // in the language they're reading — and switching language mid-chat has to move them with it.
+  readonly suggestions = computed(() => [
+    this.i18n.t('chat.suggestion.open'),
+    this.i18n.t('chat.suggestion.tasks'),
+    this.i18n.t('chat.suggestion.create'),
+    this.i18n.t('chat.suggestion.task'),
+  ]);
 
   private nextId = 1;
 
@@ -362,7 +370,7 @@ export class Chat implements OnInit, OnDestroy {
       // fresh session and conversation, then send the message once more. Anything else is a real
       // error and belongs on screen.
       if (ApiService.isStale(e) && canResend) {
-        this.push('error', 'The assistant restarted, so this chat begins again — resending your message.', true);
+        this.push('error', this.i18n.t('chat.restarted'), true);
         try {
           this.convId = (await this.api.createConversation()).conversationId;
           await call((ev) => this.handleEvent(ev));

@@ -7,12 +7,16 @@ import { DebugService } from '../services/debug.service';
 import { KindsService } from '../services/kinds.service';
 import { SourcesService } from '../services/sources.service';
 import { FilterPill } from './filter-pill';
+import { Appearance } from './appearance';
+import { Language } from './language';
+import { I18nService } from '../services/i18n.service';
 
 /**
  * The header's controls, in two groups. On the left, what you're looking at: which systems, which
  * kinds of item, and who you are (which scopes the mock). On the right, how the machine is set up:
  * LLM provider, model,
- * GPU vs CPU with a live status badge, the debug console, and — when Jira is enabled — the
+ * GPU vs CPU with a live status badge, then — past the separator, where the settings stop being
+ * about answers — appearance and the debug console, and, when Jira is enabled, the
  * connect/disconnect control. The split is the point: the left pair changes the answers you get, the
  * right group changes the machinery that produces them.
  *
@@ -22,7 +26,7 @@ import { FilterPill } from './filter-pill';
 @Component({
   selector: 'app-toolbar',
   standalone: true,
-  imports: [FilterPill],
+  imports: [FilterPill, Appearance, Language],
   template: `
     <div class="bar">
       <div class="grp">
@@ -31,9 +35,9 @@ import { FilterPill } from './filter-pill';
              (which system) sits left of the narrower one (which kind of item). -->
         <app-filter-pill
           [summary]="sources.summary()" [options]="sources.available()"
-          [selected]="sources.active()" allLabel="All sources"
-          emptyHint="No backends have answered yet."
-          hint="Which systems the assistant reads from"
+          [selected]="sources.active()" [allLabel]="i18n.t('toolbar.sources.all')"
+          [emptyHint]="i18n.t('toolbar.sources.empty')"
+          [hint]="i18n.t('toolbar.sources.hint')"
           (toggled)="sources.toggle($event)" (cleared)="sources.clear()">
           <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor"
                stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -44,9 +48,9 @@ import { FilterPill } from './filter-pill';
 
         <app-filter-pill
           [summary]="kinds.summary()" [options]="kinds.options()"
-          [selected]="kinds.active()" allLabel="All kinds"
-          emptyHint="No kinds yet — connect a backend first."
-          hint="Which kinds of item the assistant reads"
+          [selected]="kinds.active()" [allLabel]="i18n.t('toolbar.kinds.all')"
+          [emptyHint]="i18n.t('toolbar.kinds.empty')"
+          [hint]="i18n.t('toolbar.kinds.hint')"
           (toggled)="kinds.toggle($event)" (cleared)="kinds.clear()">
           <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor"
                stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -55,8 +59,8 @@ import { FilterPill } from './filter-pill';
         </app-filter-pill>
 
         <!-- Who the mock board thinks you are. "admin" is its reserved name for the whole board. -->
-        <div class="ctl" title="Who you are on the mock board — it scopes tickets to what you raised or were assigned. 'charlie' owns nothing there, so reads come only from connected accounts; 'admin' sees the whole board.">
-          <span class="lbl">User</span>
+        <div class="ctl" [title]="i18n.t('toolbar.userTitle')">
+          <span class="lbl">{{ i18n.t('toolbar.user') }}</span>
           <select class="sel user" [value]="session.userName()" (change)="onUser($any($event.target).value)">
             @for (u of session.users; track u) { <option [value]="u">{{ u }}</option> }
           </select>
@@ -67,25 +71,29 @@ import { FilterPill } from './filter-pill';
       <!-- Provider first, then its model: choosing a provider resets the model to that provider's
            default, so the wider choice belongs upstream of the narrower one. -->
       <div class="ctl">
-        <span class="lbl">Provider</span>
+        <span class="lbl">{{ i18n.t('toolbar.provider') }}</span>
         <select class="sel" [value]="llm.provider()" (change)="onProvider($any($event.target).value)">
           @for (p of llm.info()?.providers ?? []; track p) {
             <option [value]="p" [disabled]="!(llm.info()?.configured?.[p])">
-              {{ p }}{{ llm.info()?.configured?.[p] ? '' : ' (no key)' }}
+              {{ p }}{{ llm.info()?.configured?.[p] ? '' : ' (' + i18n.t('toolbar.noKey') + ')' }}
             </option>
           }
         </select>
       </div>
 
-      <div class="ctl">
-        <span class="lbl">Model</span>
+      <!-- The note beside each name is the point of this control: the tags differ by a decimal
+           point, but what separates them is whether a listing comes back whole. -->
+      <div class="ctl" [title]="modelHint()">
+        <span class="lbl">{{ i18n.t('toolbar.model') }}</span>
         <select class="sel model" [value]="llm.model()" (change)="llm.setModel($any($event.target).value)">
-          @for (m of llm.modelsFor(); track m) { <option [value]="m">{{ m }}</option> }
+          @for (m of llm.modelOptions(); track m.id) {
+            <option [value]="m.id">{{ m.id }}{{ m.note ? ' — ' + m.note : '' }}</option>
+          }
         </select>
       </div>
 
       <div class="ctl">
-        <span class="lbl">Compute</span>
+        <span class="lbl">{{ i18n.t('toolbar.compute') }}</span>
         <!-- "GPU" is the empty value: no override, which means Ollama uses the GPU when one is
              attached and falls back to CPU when not. "CPU" forces CPU-only inference. -->
         <select class="sel" [value]="llm.compute()" (change)="llm.setCompute($any($event.target).value)">
@@ -97,37 +105,44 @@ import { FilterPill } from './filter-pill';
       @if (llm.computeStatus(); as cs) {
         <span class="badge" [class.gpu]="cs.processor === 'GPU'">
           <span class="spark"></span>
-          {{ cs.loaded ? cs.processor : (cs.gpuAttached ? 'GPU idle' : (cs.hostHasGpu ? 'GPU off' : 'CPU')) }}
+          {{ cs.loaded ? cs.processor : (cs.gpuAttached ? i18n.t('toolbar.gpuIdle') : (cs.hostHasGpu ? i18n.t('toolbar.gpuOff') : 'CPU')) }}
         </span>
       }
 
       <span class="sep"></span>
 
+      <!-- Light or dark, which accent scheme, and which language — all stored in the browser. Only
+           the language reaches the API, and only as a hint about which language to answer in. -->
+      <app-appearance />
+      <app-language />
+
       <!-- Opens the debug console. Also what makes the API stream its trace at all, so it reads
            as a switch rather than a view: off means nothing extra is computed or sent. -->
       <button class="ghost dbg" [class.on]="debug.enabled()" (click)="debug.toggle()"
-              [title]="debug.enabled() ? 'Hide the debug console (Ctrl+\`)' : 'Show what the assistant is doing under the hood (Ctrl+\`)'">
+              [title]="debug.enabled() ? i18n.t('toolbar.debugHide') : i18n.t('toolbar.debugShow')">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
              stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="m8 8-4 4 4 4"/><path d="m16 8 4 4-4 4"/>
         </svg>
-        Debug
+        {{ i18n.t('toolbar.debug') }}
       </button>
 
       @if (jiraEnabled) {
         @if (jira.status().connected) {
           <span class="jira-pill">
             <span class="on"></span>
-            {{ jira.status().accountEmail || 'Connected' }}
-            @if (jira.status().sites?.length) { <span class="muted">· {{ jira.status().sites!.length }} site(s)</span> }
+            {{ jira.status().accountEmail || i18n.t('toolbar.connected') }}
+            @if (jira.status().sites?.length) {
+              <span class="muted">· {{ i18n.t('toolbar.sites', { count: jira.status().sites!.length }) }}</span>
+            }
           </span>
-          <button class="ghost" (click)="logout()">Disconnect</button>
+          <button class="ghost" (click)="logout()">{{ i18n.t('toolbar.disconnect') }}</button>
         } @else {
           <button class="cta" (click)="connect()" [disabled]="connecting()">
             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
               <path d="M9 12a3 3 0 0 1 3-3h3a3 3 0 1 1 0 6h-1"/><path d="M15 12a3 3 0 0 1-3 3H9a3 3 0 1 1 0-6h1"/>
             </svg>
-            {{ connecting() ? 'Connecting…' : 'Connect Jira' }}
+            {{ connecting() ? i18n.t('toolbar.connecting') : i18n.t('toolbar.connect') }}
           </button>
         }
       }
@@ -182,7 +197,10 @@ import { FilterPill } from './filter-pill';
       background-position: right center;
       background-size: 11px 11px;
     }
-    .sel option { background: #12141c; color: var(--text); }
+    .sel option { background: var(--menu); color: var(--text); }
+    /* A select is as wide as its widest option, and the notes are a sentence long — so the closed
+       pill is capped and elides, while the open list and the tooltip carry the whole thing. */
+    .sel.model { max-width: 11rem; text-overflow: ellipsis; }
 
     .badge {
       display: flex; align-items: center; gap: 0.4rem;
@@ -190,7 +208,7 @@ import { FilterPill } from './filter-pill';
       height: var(--pill-h); padding: 0 0.7rem; border-radius: var(--r-full);
       background: var(--surface); border: 1px solid var(--border); color: var(--text-dim);
     }
-    .badge.gpu { background: rgba(52, 211, 153, 0.12); border-color: rgba(52, 211, 153, 0.35); color: #7ff0c4; }
+    .badge.gpu { background: var(--ok-soft); border-color: var(--ok-line); color: var(--ok-fg); }
     .badge .spark { width: 6px; height: 6px; border-radius: 50%; background: currentColor; box-shadow: 0 0 8px currentColor; }
 
     .sep { width: 1px; height: 22px; background: var(--border); margin: 0 0.1rem; }
@@ -198,11 +216,14 @@ import { FilterPill } from './filter-pill';
     .cta {
       display: flex; align-items: center; gap: 0.45rem;
       height: var(--pill-h); padding: 0 0.95rem; border: 0; border-radius: var(--r-full);
-      color: #fff; font-weight: 600; font-size: 0.8rem; line-height: 1;
+      color: var(--on-accent); font-weight: 600; font-size: 0.8rem; line-height: 1;
       background: var(--grad); box-shadow: var(--glow);
       transition: transform 0.15s var(--ease), box-shadow 0.2s var(--ease), filter 0.2s;
     }
-    .cta:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 16px 46px -10px rgba(124, 108, 255, 0.75); filter: brightness(1.05); }
+    .cta:hover:not(:disabled) {
+      transform: translateY(-1px); filter: brightness(1.05);
+      box-shadow: 0 16px 46px -10px color-mix(in srgb, var(--accent) 75%, transparent);
+    }
     .cta:active { transform: translateY(0); }
     .cta:disabled { opacity: 0.65; cursor: default; }
 
@@ -217,20 +238,20 @@ import { FilterPill } from './filter-pill';
     /* Lit while it's on: this one has a running cost (the API traces every turn), so it shouldn't
        be possible to leave it enabled without noticing. */
     .ghost.dbg.on {
-      background: rgba(124, 108, 255, 0.16); border-color: rgba(150, 120, 255, 0.6); color: #ded8ff;
-      box-shadow: inset 0 0 0 1px rgba(124, 108, 255, 0.15);
+      background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent-fg);
+      box-shadow: inset 0 0 0 1px var(--accent-ring);
     }
 
     .jira-pill {
       display: flex; align-items: center; gap: 0.4rem;
-      font-size: 0.75rem; color: #cfeadd; line-height: 1;
+      font-size: 0.75rem; color: var(--ok-fg); line-height: 1;
       height: var(--pill-h); padding: 0 0.75rem; border-radius: var(--r-full);
-      background: rgba(52, 211, 153, 0.1); border: 1px solid rgba(52, 211, 153, 0.28);
+      background: var(--ok-soft); border: 1px solid var(--ok-line);
     }
     .jira-pill .on { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 8px var(--ok); }
-    .jira-pill .muted { color: rgba(207, 234, 221, 0.6); }
+    .jira-pill .muted { opacity: 0.65; }
 
-    .err { margin-top: 0.4rem; font-size: 0.75rem; color: #ffb4b4; text-align: right; }
+    .err { margin-top: 0.4rem; font-size: 0.75rem; color: var(--danger-fg); text-align: right; }
   `],
 })
 export class Toolbar {
@@ -243,10 +264,17 @@ export class Toolbar {
   readonly debug = inject(DebugService);
   readonly kinds = inject(KindsService);
   readonly sources = inject(SourcesService);
+  readonly i18n = inject(I18nService);
   private readonly projects = inject(ProjectsService);
 
   readonly connecting = signal(false);
   readonly error = signal<string | null>(null);
+
+  /** The selected model's note, for the pill's tooltip — a native select truncates its own text. */
+  modelHint(): string {
+    const note = this.llm.noteFor();
+    return note ? `${this.llm.model()} — ${note}` : this.i18n.t('toolbar.modelTitle');
+  }
 
 
   onUser(name: string): void {

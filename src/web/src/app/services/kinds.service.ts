@@ -1,6 +1,7 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
 import { DebugService } from './debug.service';
 import { ProjectsService } from './projects.service';
+import { I18nService } from './i18n.service';
 
 const STORAGE_KEY = 'ta-kinds';
 
@@ -18,6 +19,7 @@ const STORAGE_KEY = 'ta-kinds';
 export class KindsService {
   private readonly projects = inject(ProjectsService);
   private readonly debug = inject(DebugService);
+  private readonly i18n = inject(I18nService);
 
   readonly selected = signal<ReadonlySet<string>>(load());
 
@@ -40,8 +42,10 @@ export class KindsService {
   /** What the toolbar pill says: the filter at a glance, without opening it. */
   readonly summary = computed(() => {
     const on = this.active();
-    if (!on.length) return 'All kinds';
-    return on.length <= 2 ? on.join(', ') : `${on.length} kinds`;
+    if (!on.length) return this.i18n.t('toolbar.kinds.all');
+    // The kinds themselves are the backends' own words for them ("Bug", "Story"), so they are
+    // listed as they came; only the counting word is ours to translate.
+    return on.length <= 2 ? on.join(', ') : this.i18n.t('toolbar.kinds.count', { count: on.length });
   });
 
   /** Per-request header for the chat/confirm calls; absent when nothing is filtered. */

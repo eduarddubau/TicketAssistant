@@ -91,6 +91,22 @@ ollama_stale() {
   [ "$has_gpu" != "$want_gpu" ] || [ "$keepalive" != "${want_keepalive:--1}" ]
 }
 
+# The same problem for the model lineup: an api container created before qwen3:4b-instruct was
+# added still offers the old list in its dropdown, and the one-shot puller still has the old list
+# to download — neither notices that .env changed. Compared against the api container because it
+# is the one that has to agree with the console.
+models_stale() {
+  local name running want
+  name=$(podman ps -a --format '{{.Names}}' | grep -m1 -E '[-_]api[-_]1$' || true)
+  [ -n "$name" ] || return 1   # nothing there yet — compose will create it with today's list
+  running=$(podman inspect "$name" --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null \
+    | sed -n 's/^Ollama__Models=//p' | head -1 | tr -d '\r' | sed 's/^ *//; s/ *$//')
+  # A blank or unreadable value means the inspect failed, not that the lineup changed —
+  # re-creating the whole stack on a guess is worse than leaving it alone.
+  want=${OLLAMA_MODELS:-$(dotenv OLLAMA_MODELS)}
+  [ -n "$want" ] && [ -n "$running" ] && [ "$running" != "$want" ]
+}
+
 # One-time host setup for GPU containers (Fedora/RHEL). Called only after the user says
 # yes — it adds NVIDIA's repo and installs packages via sudo, which should be an explicit
 # choice. Idempotent: each part checks before changing anything. Returns 0 when the CDI
@@ -178,11 +194,14 @@ compose_up() {
 if ollama_stale; then
   echo "The existing Ollama container has different GPU/keep-alive settings — re-creating it."
   compose_up --force-recreate "$@"
+elif models_stale; then
+  echo "The model lineup changed since these containers were created — re-creating them."
+  compose_up --force-recreate "$@"
 else
   compose_up "$@"
 fi
 
-step "5/6 Downloading the chat model (a couple of GB on first run, instant after)"
+step "5/6 Downloading the chat models (a few GB on first run, instant after)"
 puller=$(podman ps -a --format '{{.Names}}' | grep ollama-pull | head -1)
 podman logs -f "$puller" 2>&1 || true
 rc=$(podman inspect --format '{{.State.ExitCode}}' "$puller")
@@ -192,8 +211,10 @@ if [ "$rc" != "0" ]; then
 fi
 
 step "6/6 Checking what Ollama ended up running"
-# What actually happened, rather than what was asked for: PROCESSOR says GPU or CPU, and
-# UNTIL "Forever" confirms the model stays loaded instead of being unloaded when idle.
+# What actually happened, rather than what was asked for: NAME is which of the lineup got warmed
+# up (the first one), PROCESSOR says GPU or CPU, and UNTIL "Forever" confirms it stays loaded
+# instead of being unloaded when idle. Only one model is listed on purpose — switching models in
+# the console evicts the previous one so a 6GB card isn't asked to hold two.
 ollama=$(ollama_container)
 if [ -n "$ollama" ]; then
   loaded=$(podman exec "$ollama" ollama ps 2>&1 || true)

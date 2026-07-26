@@ -6,6 +6,23 @@
   <base href="/">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="icon" type="image/x-icon" href="favicon.ico">
+  <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f6f7fb">
+  <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#07080c">
+  <!-- Both appearance choices, re-applied before the first paint: Angular boots too late to stop a
+       reload flashing the other theme, and a flash of the wrong theme is the one thing a stored
+       choice is supposed to prevent. Violet is the default scheme, so it writes no attribute. -->
+  <script>
+    try {
+      var t = localStorage.getItem('ta-theme');
+      if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
+      var p = localStorage.getItem('ta-palette');
+      if (p && p !== 'violet') document.documentElement.dataset.palette = p;
+      // <html lang> before Angular boots, so a screen reader and the browser's own spellcheck
+      // aren't briefly told the page is English when it isn't.
+      var l = localStorage.getItem('ta-lang');
+      if (l === 'en' || l === 'ro' || l === 'de') document.documentElement.lang = l;
+    } catch (e) {}
+  </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">

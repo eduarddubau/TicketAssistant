@@ -115,12 +115,15 @@ builder.Services.AddSingleton<UndoStore>();
 // (X-Item-Types) and which backends (X-Sources).
 builder.Services.AddSingleton<ItemTypeScope>();
 builder.Services.AddSingleton<SourceScope>();
+// Which language the console is being read in, so the assistant answers in it too.
+builder.Services.AddSingleton<LanguageScope>();
 builder.Services.AddSingleton(sp =>
     TicketTools.Build(
         sp.GetRequiredService<ITicketProvider>(),
         sp.GetRequiredService<UndoStore>(),
         sp.GetRequiredService<ItemTypeScope>(),
-        sp.GetRequiredService<SourceScope>()));
+        sp.GetRequiredService<SourceScope>(),
+        sp.GetRequiredService<LanguageScope>()));
 builder.Services.AddSingleton<OrchestrationLoop>();
 builder.Services.AddSingleton<ConversationStore>();
 
@@ -179,22 +182,24 @@ var ticketUrlTemplate = UsesBackend("Http") || UsesBackend("InMemory")
 // Start a new chat. Returns its id, the greeting it opened with (one of several, rotated per
 // chat), the mock link template, and whether Jira is enabled (so the SPA shows the connect UI
 // and gates chat behind it).
-app.MapPost("/api/conversations", (ConversationStore store, CurrentSession current) =>
+app.MapPost("/api/conversations", (ConversationStore store, CurrentSession current, LanguageScope language) =>
 {
     // Identity is the point of a session here, so an unknown or expired one is a 401 rather than an
     // anonymous chat: without a user the mock's reads used to fall back to its admin view, and the
     // assistant would cheerfully list every user's tickets as if they were yours.
     if (current.Get() is null) return Results.Unauthorized();
 
-    var (conversationId, greeting) = store.Create();
+    var (conversationId, greeting) = store.Create(language.Tag);
     return Results.Ok(new { conversationId, greeting, boardUrl, ticketUrlTemplate, jiraEnabled });
 });
 
 // The assistant's standing instructions, verbatim. Only answered for a caller that asked for the
 // debug trace (X-Debug): it's what the console's debug console shows the moment it's opened,
 // instead of waiting for the next turn to carry the system prompt along with everything else.
-app.MapGet("/api/system-prompt", (DebugTrace debug) => debug.Enabled
-    ? Results.Ok(new { systemPrompt = ConversationStore.SystemPrompt })
+// The language instruction is part of it whenever one is in force, or the panel would show a
+// prompt the model was never actually given.
+app.MapGet("/api/system-prompt", (DebugTrace debug, LanguageScope language) => debug.Enabled
+    ? Results.Ok(new { systemPrompt = ConversationStore.SystemPrompt + language.PromptInstruction })
     : Results.NotFound());
 
 // Which LLM providers exist, which models each is configured with, which one this request would

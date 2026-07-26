@@ -14,6 +14,21 @@ import { DebugService } from './debug.service';
  * so the timeline records it, next to the turns it changes. No API keys, only which providers have
  * one configured.
  */
+/**
+ * What each model is actually like to use here, from replaying the same reads against the seeded
+ * board rather than from its parameter count. Keyed by the exact tag, because that is what the
+ * picker offers; a model someone adds to OLLAMA_MODELS gets no note, which is honest — nobody has
+ * run it against this app.
+ *
+ * The hosted providers are deliberately absent: their lineups change under us, and a stale note
+ * about a model that has since been retrained is worse than none.
+ */
+const MODEL_NOTES: Record<string, string> = {
+  'qwen2.5:3b': 'fast, and gets listings right — the default',
+  'qwen3:4b-instruct': 'steadiest tool caller; bigger, so slower to load',
+  'qwen2.5:1.5b': 'fastest, but often answers without reading — for testing',
+};
+
 @Injectable({ providedIn: 'root' })
 export class LlmService {
   private readonly session = inject(SessionService);
@@ -62,6 +77,22 @@ export class LlmService {
    */
   modelsFor(provider = this.provider()): string[] {
     return this.info()?.models?.[provider] ?? [];
+  }
+
+  /**
+   * The same list with the one-line note the picker shows beside each name. The difference between
+   * these models is not the size in their name — it is whether an answer can be trusted, and that
+   * is invisible until a listing comes back three items short. So the notes say what was actually
+   * measured on the seeded board (see MODEL_NOTES); anything not on that list is offered without a
+   * note rather than with a guess.
+   */
+  modelOptions(provider = this.provider()): { id: string; note?: string }[] {
+    return this.modelsFor(provider).map((id) => ({ id, note: MODEL_NOTES[id] }));
+  }
+
+  /** The note for whatever is selected — the picker's tooltip. */
+  noteFor(model = this.model()): string | undefined {
+    return MODEL_NOTES[model];
   }
 
   async refreshComputeStatus(): Promise<void> {

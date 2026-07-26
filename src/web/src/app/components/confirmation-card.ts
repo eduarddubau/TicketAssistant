@@ -2,12 +2,21 @@ import { Component, EventEmitter, Input, OnInit, Output, inject, signal } from '
 import { FormsModule } from '@angular/forms';
 import { JiraProject, OrchestrationEvent, providerLabel } from '../models';
 import { ProjectsService } from '../services/projects.service';
+import { I18nService } from '../services/i18n.service';
+import { StringKey } from '../i18n/strings';
 
 type ConfirmationEvent = Extract<OrchestrationEvent, { type: 'confirmation_required' }>;
 export interface Decision { approved: boolean; callId: string; edits?: Record<string, unknown>; }
 
-interface Field { key: string; label: string; kind: 'text' | 'textarea' | 'select' | 'date'; options?: string[]; required?: boolean; readonly?: boolean; }
-interface Spec { heading: string; verb: string; fields: Field[]; initial: Record<string, any>; edits: (v: Record<string, any>) => Record<string, unknown>; }
+// Labels are held as keys rather than text: a card can sit on screen across a language switch —
+// it is waiting for the user, which is exactly when they might change it — and text baked in when
+// the card was built would be left behind in the old language.
+interface Field { key: string; labelKey: StringKey; kind: 'text' | 'textarea' | 'select' | 'date'; options?: string[]; required?: boolean; readonly?: boolean; }
+interface Spec {
+  headingKey: StringKey; headingParams?: Record<string, string>;
+  verbKey: StringKey; fields: Field[];
+  initial: Record<string, any>; edits: (v: Record<string, any>) => Record<string, unknown>;
+}
 
 const SEVERITIES = ['Low', 'Medium', 'High', 'Urgent'];
 const STATUSES = ['Open', 'InProgress', 'Blocked', 'Resolved', 'Closed'];
@@ -20,17 +29,17 @@ function specFor(evt: ConfirmationEvent): Spec {
   const a = evt.arguments ?? {};
   // Editable: if the model picked the wrong ticket, the user corrects it here. The card shows the
   // ticket's provider/project live underneath, so it's obvious which system is about to change.
-  const ticket: Field = { key: 'ticketId', label: 'Ticket', kind: 'text', required: true };
+  const ticket: Field = { key: 'ticketId', labelKey: 'card.field.ticket', kind: 'text', required: true };
 
   switch (evt.toolName) {
     case 'create_ticket': {
       const fields: Field[] = [
-        { key: 'title', label: 'Title', kind: 'text', required: true },
-        { key: 'description', label: 'Description', kind: 'textarea', required: true },
-        { key: 'priority', label: 'Severity', kind: 'select', options: SEVERITIES },
+        { key: 'title', labelKey: 'card.field.title', kind: 'text', required: true },
+        { key: 'description', labelKey: 'card.field.description', kind: 'textarea', required: true },
+        { key: 'priority', labelKey: 'card.field.severity', kind: 'select', options: SEVERITIES },
       ];
       return {
-        heading: '⚠️ Review & confirm new item', verb: 'Create',
+        headingKey: 'card.heading.create', verbKey: 'card.verb.create',
         fields,
         initial: { title: a['title'] ?? '', description: a['description'] ?? '', priority: a['priority'] ?? 'Medium' },
         edits: (v) => ({ title: v['title'], description: v['description'], priority: v['priority'] }),
@@ -38,43 +47,43 @@ function specFor(evt: ConfirmationEvent): Spec {
     }
     case 'update_ticket_status':
       return {
-        heading: '⚠️ Confirm status change', verb: 'Update status',
-        fields: [ticket, { key: 'status', label: 'New status', kind: 'select', options: STATUSES }],
+        headingKey: 'card.heading.status', verbKey: 'card.verb.status',
+        fields: [ticket, { key: 'status', labelKey: 'card.field.status', kind: 'select', options: STATUSES }],
         initial: { ticketId: a['ticketId'] ?? '', status: a['status'] ?? 'Open' },
         edits: (v) => ({ ticketId: v['ticketId'], status: v['status'] }),
       };
     case 'set_due_date':
       return {
-        heading: '⚠️ Confirm due date', verb: 'Set due date',
-        fields: [ticket, { key: 'dueAt', label: 'Due date (blank = none)', kind: 'date' }],
+        headingKey: 'card.heading.due', verbKey: 'card.verb.due',
+        fields: [ticket, { key: 'dueAt', labelKey: 'card.field.due', kind: 'date' }],
         initial: { ticketId: a['ticketId'] ?? '', dueAt: (a['dueAt'] ?? '').slice(0, 10) },
         edits: (v) => ({ ticketId: v['ticketId'], dueAt: v['dueAt'] || null }),
       };
     case 'assign_ticket':
       return {
-        heading: '⚠️ Confirm assignment', verb: 'Assign ticket',
-        fields: [ticket, { key: 'assignee', label: 'Assign to (blank = unassigned)', kind: 'text' }],
+        headingKey: 'card.heading.assign', verbKey: 'card.verb.assign',
+        fields: [ticket, { key: 'assignee', labelKey: 'card.field.assignee', kind: 'text' }],
         initial: { ticketId: a['ticketId'] ?? '', assignee: a['assignee'] ?? '' },
         edits: (v) => ({ ticketId: v['ticketId'], assignee: v['assignee'] }),
       };
     case 'resolve_ticket':
       return {
-        heading: '⚠️ Confirm resolve', verb: 'Resolve ticket',
-        fields: [ticket, { key: 'note', label: 'Resolution note', kind: 'textarea', required: true }],
+        headingKey: 'card.heading.resolve', verbKey: 'card.verb.resolve',
+        fields: [ticket, { key: 'note', labelKey: 'card.field.note', kind: 'textarea', required: true }],
         initial: { ticketId: a['ticketId'] ?? '', note: a['note'] ?? '' },
         edits: (v) => ({ ticketId: v['ticketId'], note: v['note'] }),
       };
     case 'add_comment':
       return {
-        heading: '⚠️ Confirm comment', verb: 'Add comment',
-        fields: [ticket, { key: 'body', label: 'Comment', kind: 'textarea', required: true }],
+        headingKey: 'card.heading.comment', verbKey: 'card.verb.comment',
+        fields: [ticket, { key: 'body', labelKey: 'card.field.comment', kind: 'textarea', required: true }],
         initial: { ticketId: a['ticketId'] ?? '', body: a['body'] ?? '' },
         edits: (v) => ({ ticketId: v['ticketId'], body: v['body'] }),
       };
     default:
       return {
-        heading: '⚠️ Confirm: ' + evt.toolName, verb: 'Confirm',
-        fields: [{ key: 'raw', label: 'Arguments', kind: 'textarea', readonly: true }],
+        headingKey: 'card.heading.other', headingParams: { tool: evt.toolName }, verbKey: 'card.verb.other',
+        fields: [{ key: 'raw', labelKey: 'card.field.arguments', kind: 'textarea', readonly: true }],
         initial: { raw: JSON.stringify(a, null, 2) },
         edits: () => ({}),
       };
@@ -87,7 +96,7 @@ function specFor(evt: ConfirmationEvent): Spec {
   imports: [FormsModule],
   template: `
     <div class="card">
-      <h3>{{ spec.heading }}</h3>
+      <h3>{{ i18n.t(spec.headingKey, spec.headingParams) }}</h3>
 
       @if (isCreate) {
         <!-- Where the new item goes and what kind it is. Provider is always asked for; site,
@@ -95,7 +104,7 @@ function specFor(evt: ConfirmationEvent): Spec {
              isn't padded with empty pickers. -->
         <div class="target">
           <label class="fld">
-            Provider
+            {{ i18n.t('card.provider') }}
             <select [disabled]="decided()" [(ngModel)]="target.provider" (ngModelChange)="onProviderChange()">
               @for (p of providerOptions(); track p.id) { <option [value]="p.id">{{ p.label }}</option> }
             </select>
@@ -103,7 +112,7 @@ function specFor(evt: ConfirmationEvent): Spec {
 
           @if (siteOptions().length) {
             <label class="fld">
-              Site
+              {{ i18n.t('card.site') }}
               <select [disabled]="decided()" [(ngModel)]="target.site" (ngModelChange)="onSiteChange()">
                 @for (s of siteOptions(); track s) { <option [value]="s">{{ s }}</option> }
               </select>
@@ -112,7 +121,7 @@ function specFor(evt: ConfirmationEvent): Spec {
 
           @if (projectOptions().length) {
             <label class="fld">
-              Project
+              {{ i18n.t('card.project') }}
               <select [disabled]="decided()" [(ngModel)]="target.project" (ngModelChange)="onProjectChange()">
                 @for (p of projectOptions(); track p.key) {
                   <option [value]="p.key">{{ p.key }}{{ p.name && p.name !== p.key ? ' — ' + p.name : '' }}</option>
@@ -125,7 +134,7 @@ function specFor(evt: ConfirmationEvent): Spec {
                offered, so an approved card can't be rejected by the backend for an unknown type. -->
           @if (typeOptions().length) {
             <label class="fld">
-              Kind
+              {{ i18n.t('card.kind') }}
               <select [disabled]="decided()" [(ngModel)]="target.type">
                 @for (t of typeOptions(); track t) { <option [value]="t">{{ t }}</option> }
               </select>
@@ -136,7 +145,7 @@ function specFor(evt: ConfirmationEvent): Spec {
 
       @for (f of spec.fields; track f.key) {
         <label class="fld">
-          {{ f.label }}
+          {{ i18n.t(f.labelKey) }}
           @if (f.kind === 'textarea') {
             <textarea rows="3" [disabled]="!!f.readonly || decided()" [(ngModel)]="values[f.key]"></textarea>
           } @else if (f.kind === 'select') {
@@ -154,21 +163,21 @@ function specFor(evt: ConfirmationEvent): Spec {
              the owning provider actually has are shown. -->
         @if (ticketOrigin(); as o) {
           <div class="origin">
-            <span><b>Provider</b>{{ o.provider }}</span>
-            @if (o.site) { <span><b>Site</b>{{ o.site }}</span> }
-            @if (o.project) { <span><b>Project</b>{{ o.project }}</span> }
+            <span><b>{{ i18n.t('card.provider') }}</b>{{ o.provider }}</span>
+            @if (o.site) { <span><b>{{ i18n.t('card.site') }}</b>{{ o.site }}</span> }
+            @if (o.project) { <span><b>{{ i18n.t('card.project') }}</b>{{ o.project }}</span> }
           </div>
         } @else if (hasTicketId()) {
-          <div class="origin unknown">Unrecognised ticket — check the id</div>
+          <div class="origin unknown">{{ i18n.t('card.unknownTicket') }}</div>
         }
       }
       @if (!decided()) {
         <div class="actions">
           <button class="approve" [disabled]="!valid()" (click)="approve()">{{ verbLabel() }}</button>
-          <button class="decline" (click)="declineIt()">Cancel</button>
+          <button class="decline" (click)="declineIt()">{{ i18n.t('card.cancel') }}</button>
         </div>
       } @else {
-        <div class="decided">{{ approvedChoice ? '✓ ' + verbLabel() : '✗ Cancelled' }}</div>
+        <div class="decided">{{ approvedChoice ? '✓ ' + verbLabel() : '✗ ' + i18n.t('card.cancelled') }}</div>
       }
     </div>
   `,
@@ -190,15 +199,15 @@ function specFor(evt: ConfirmationEvent): Spec {
     }
     .fld input, .fld textarea, .fld select {
       display: block; width: 100%; margin-top: 0.35rem; padding: 0.55rem 0.65rem;
-      border-radius: var(--r-sm); border: 1px solid var(--border); background: rgba(0, 0, 0, 0.28); color: var(--text);
+      border-radius: var(--r-sm); border: 1px solid var(--border); background: var(--inset); color: var(--text);
       font-size: 0.85rem; font-weight: 400; text-transform: none; letter-spacing: 0; box-sizing: border-box;
       transition: border-color 0.15s var(--ease), box-shadow 0.15s var(--ease);
     }
     .fld input:focus, .fld textarea:focus, .fld select:focus {
-      outline: none; border-color: rgba(124, 108, 255, 0.55); box-shadow: 0 0 0 3px rgba(124, 108, 255, 0.14);
+      outline: none; border-color: var(--accent-line); box-shadow: 0 0 0 3px var(--accent-ring);
     }
     .fld input:disabled, .fld textarea:disabled, .fld select:disabled { opacity: 0.6; }
-    .fld select option, .fld select optgroup { background: #12141c; color: var(--text); }
+    .fld select option, .fld select optgroup { background: var(--menu); color: var(--text); }
 
     /* Provider / Site / Project sit on one row when they fit; each keeps its own label so it is
        obvious which is which. */
@@ -218,12 +227,12 @@ function specFor(evt: ConfirmationEvent): Spec {
       font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.06em;
       color: var(--text-faint); font-weight: 700;
     }
-    .origin.unknown { color: #ffcf9a; border: 1px solid rgba(240, 180, 41, 0.45);
-      background: rgba(240, 180, 41, 0.10); border-radius: var(--r-sm); padding: 0.35rem 0.55rem; }
+    .origin.unknown { color: var(--warn-fg); border: 1px solid var(--warn-line);
+      background: var(--warn-soft); border-radius: var(--r-sm); padding: 0.35rem 0.55rem; }
 
     .actions { display: flex; gap: 0.55rem; margin-top: 0.95rem; }
     button { padding: 0.55rem 1.05rem; border-radius: var(--r-sm); border: 0; font-weight: 600; font-size: 0.83rem; transition: 0.15s var(--ease); }
-    .approve { background: var(--grad); color: #fff; box-shadow: var(--glow); }
+    .approve { background: var(--grad); color: var(--on-accent); box-shadow: var(--glow); }
     .approve:hover:not(:disabled) { transform: translateY(-1px); filter: brightness(1.06); }
     .approve:disabled { opacity: 0.5; box-shadow: none; cursor: default; }
     .decline { background: var(--surface); border: 1px solid var(--border); color: var(--text-dim); }
@@ -237,6 +246,7 @@ export class ConfirmationCard implements OnInit {
   @Output() decision = new EventEmitter<Decision>();
 
   private readonly projectsSvc = inject(ProjectsService);
+  readonly i18n = inject(I18nService);
 
   /** Where a new item goes and what kind it is. Provider is always required; the rest depend on it. */
   target: { provider: string; site: string | null; project: string | null; type: string | null } =
@@ -293,7 +303,9 @@ export class ConfirmationCard implements OnInit {
    * changes the kind.
    */
   verbLabel(): string {
-    return this.isCreate ? `Create ${(this.target.type ?? 'item').toLowerCase()}` : this.spec.verb;
+    return this.isCreate
+      ? this.i18n.t('card.verb.create', { kind: (this.target.type ?? 'item').toLowerCase() })
+      : this.i18n.t(this.spec.verbKey);
   }
 
   hasTicketId(): boolean {

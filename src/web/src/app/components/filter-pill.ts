@@ -1,4 +1,5 @@
-import { Component, EventEmitter, HostListener, Input, Output, signal } from '@angular/core';
+import { Component, EventEmitter, HostListener, Input, Output, inject, signal } from '@angular/core';
+import { I18nService } from '../services/i18n.service';
 
 /**
  * A header pill that opens a list of toggles: the shape both reading filters use — which systems to
@@ -30,9 +31,9 @@ import { Component, EventEmitter, HostListener, Input, Output, signal } from '@a
                 <span class="name">{{ o.label }}</span>
               </label>
             }
-            <p class="note">Nothing ticked means all of them.</p>
+            <p class="note">{{ i18n.t('filter.allMeans') }}</p>
           } @else {
-            <p class="note">{{ emptyHint }}</p>
+            <p class="note">{{ emptyHint || i18n.t('filter.none') }}</p>
           }
         </div>
       }
@@ -52,7 +53,7 @@ import { Component, EventEmitter, HostListener, Input, Output, signal } from '@a
     .pill:hover { background: var(--surface-2); color: var(--text); border-color: var(--border-strong); }
     /* Lit while it hides something — a filter you've forgotten is a filter that misleads you. */
     .pill.on {
-      background: rgba(124, 108, 255, 0.16); border-color: rgba(150, 120, 255, 0.6); color: #ded8ff;
+      background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent-fg);
     }
     .wrap.open .pill { border-color: var(--border-strong); }
 
@@ -60,7 +61,7 @@ import { Component, EventEmitter, HostListener, Input, Output, signal } from '@a
       position: absolute; top: calc(100% + 0.4rem); left: 0; z-index: 30;
       min-width: 13rem; max-width: 22rem; max-height: 60vh; overflow: auto;
       padding: 0.45rem; border-radius: var(--r); text-align: left;
-      background: rgba(14, 16, 24, 0.96); border: 1px solid var(--border-strong);
+      background: var(--pop); border: 1px solid var(--border-strong);
       backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
       box-shadow: var(--shadow-lg); animation: rise 0.15s var(--ease);
     }
@@ -70,7 +71,7 @@ import { Component, EventEmitter, HostListener, Input, Output, signal } from '@a
       background: transparent; color: var(--text-dim); font-size: 0.76rem; font-weight: 600;
     }
     .all:hover { background: var(--surface-2); color: var(--text); }
-    .all.on { background: rgba(124, 108, 255, 0.16); border-color: rgba(150, 120, 255, 0.5); color: #ded8ff; }
+    .all.on { background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent-fg); }
 
     .row {
       display: flex; align-items: center; gap: 0.5rem;
@@ -89,8 +90,10 @@ export class FilterPill {
   @Input({ required: true }) options: { value: string; label: string }[] = [];
   @Input() selected: readonly string[] = [];
   @Input() allLabel = 'All';
-  @Input() emptyHint = 'Nothing to choose from yet.';
+  @Input() emptyHint = '';
   @Input() hint = '';
+
+  readonly i18n = inject(I18nService);
 
   @Output() toggled = new EventEmitter<string>();
   @Output() cleared = new EventEmitter<void>();

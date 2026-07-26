@@ -97,6 +97,24 @@ function Test-OllamaStale {
     return ($hasGpu -ne $wantGpu) -or ($keepAlive -ne $wantKeepAlive)
 }
 
+# The same problem for the model lineup: an api container created before qwen3:4b-instruct was
+# added still offers the old list in its dropdown, and the one-shot puller still has the old list
+# to download — neither notices that .env changed. Compared against the api container because it
+# is the one that has to agree with the console.
+function Test-ModelsStale {
+    $name = podman ps -a --format '{{.Names}}' | Select-String '[-_]api[-_]1$' | Select-Object -First 1
+    if (-not $name) { return $false }   # nothing there yet — compose will create it with today's list
+
+    $running = (podman inspect $name.ToString() --format '{{range .Config.Env}}{{println .}}{{end}}' 2>$null |
+        Select-String '^Ollama__Models=(.*)$' | Select-Object -First 1)
+    $running = if ($running) { $running.Matches[0].Groups[1].Value.Trim() } else { "" }
+
+    # A blank or unreadable value means the inspect failed, not that the lineup changed —
+    # re-creating the whole stack on a guess is worse than leaving it alone.
+    $want = if ($env:OLLAMA_MODELS) { $env:OLLAMA_MODELS } else { Get-DotEnv "OLLAMA_MODELS" }
+    return $want -and $running -and ($running -ne $want)
+}
+
 function Get-MachineCdiEntries {
     $entries = podman machine ssh "ls /etc/cdi 2>/dev/null" 2>$null
     if ($LASTEXITCODE -ne 0 -and (Test-Path "/etc/cdi")) {
@@ -178,6 +196,10 @@ if (Test-OllamaStale) {
     Write-Host "The existing Ollama container has different GPU/keep-alive settings - re-creating it."
     $upArgs += "--force-recreate"
 }
+elseif (Test-ModelsStale) {
+    Write-Host "The model lineup changed since these containers were created - re-creating them."
+    $upArgs += "--force-recreate"
+}
 if ($ComposeArgs) { $upArgs += $ComposeArgs }
 # podman-compose occasionally trips over recreating an exited one-shot container
 # ("no container ... found", exit 125); a single retry settles it.
@@ -189,7 +211,7 @@ if ($LASTEXITCODE -ne 0) {
     if ($LASTEXITCODE -ne 0) { Finish $LASTEXITCODE }
 }
 
-Step "5/6 Downloading the chat model (a couple of GB on first run, instant after)"
+Step "5/6 Downloading the chat models (a few GB on first run, instant after)"
 $puller = (podman ps -a --format '{{.Names}}' | Select-String "ollama-pull" | Select-Object -First 1).ToString()
 podman logs -f $puller 2>&1
 $rc = podman inspect --format '{{.State.ExitCode}}' $puller
@@ -199,8 +221,10 @@ if ($rc -ne "0") {
 }
 
 Step "6/6 Checking what Ollama ended up running"
-# What actually happened, rather than what was asked for: PROCESSOR says GPU or CPU, and
-# UNTIL "Forever" confirms the model stays loaded instead of being unloaded when idle.
+# What actually happened, rather than what was asked for: NAME is which of the lineup got warmed
+# up (the first one), PROCESSOR says GPU or CPU, and UNTIL "Forever" confirms it stays loaded
+# instead of being unloaded when idle. Only one model is listed on purpose — switching models in
+# the console evicts the previous one so a 6GB card isn't asked to hold two.
 $ollama = Get-OllamaContainer
 if ($ollama) {
     $ps = podman exec $ollama ollama ps 2>&1

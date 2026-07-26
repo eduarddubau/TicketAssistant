@@ -159,7 +159,10 @@ function Invoke-DryRun {
     $env:PATH = $fullFake + [System.IO.Path]::PathSeparator + $originalPath
     $env:OLLAMA_GPU_DEVICE = 'nvidia.com/gpu=all'
     $env:OLLAMA_KEEP_ALIVE = ''
-    foreach ($name in 'FAKE_DEVICES', 'FAKE_KEEPALIVE', 'FAKE_PROCESSOR', 'FAKE_PULL_EXIT') {
+    # Pinned rather than left to .env: what the running container reports is the fake's business,
+    # and a dry run must not change its answer because someone edited their own model lineup.
+    $env:OLLAMA_MODELS = if ($Fake['OLLAMA_MODELS']) { [string]$Fake['OLLAMA_MODELS'] } else { 'qwen2.5:3b qwen3:4b-instruct qwen2.5:1.5b' }
+    foreach ($name in 'FAKE_DEVICES', 'FAKE_KEEPALIVE', 'FAKE_MODELS', 'FAKE_PROCESSOR', 'FAKE_PULL_EXIT') {
         Set-Item "env:$name" -Value ([string]$Fake[$name])
     }
     try {
@@ -189,6 +192,17 @@ Write-Host "Dry run: the container would unload the model when idle"
 $run = Invoke-DryRun -Fake @{ FAKE_KEEPALIVE = '5m' }
 CheckMatch "re-creates the stack" $run.Output '\[fake\] compose up args: -d --force-recreate'
 Check      "exit code"            0 $run.ExitCode
+
+Write-Host "Dry run: the model lineup changed since the containers were created"
+$run = Invoke-DryRun -Fake @{ FAKE_MODELS = 'qwen2.5:3b' }
+CheckMatch "says why it is re-creating" $run.Output 'model lineup changed'
+CheckMatch "re-creates the stack"       $run.Output '\[fake\] compose up args: -d --force-recreate'
+Check      "exit code"                  0 $run.ExitCode
+
+Write-Host "Dry run: a container that can't be inspected is left alone"
+$run = Invoke-DryRun -Fake @{ FAKE_MODELS = ' ' }
+CheckMatch "does not re-create on an unreadable lineup" $run.Output 'force-recreate' $false
+Check      "exit code"                                  0 $run.ExitCode
 
 Write-Host "Dry run: Ollama ended up on the CPU anyway"
 $run = Invoke-DryRun -Fake @{ FAKE_PROCESSOR = '100% CPU' }

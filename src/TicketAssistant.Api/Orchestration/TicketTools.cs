@@ -1,3 +1,5 @@
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using Microsoft.Extensions.AI;
 using TicketAssistant.Api.Models;
 using TicketAssistant.Api.Providers;
@@ -52,6 +54,86 @@ public static class TicketTools
         string Instructions, string? Filter, IReadOnlyList<TicketGroup> Groups);
 
     /// <summary>
+    /// A read result reduced to the two things an answer can be checked against: the ids it was
+    /// about, and the listing written out the way the instructions ask for. Handed to
+    /// OrchestrationLoop so a reply that names none of these ids can be replaced by
+    /// <see cref="Markdown"/> — see <see cref="AsListing"/>.
+    /// </summary>
+    public sealed record Listing(IReadOnlyList<string> Ids, string Markdown);
+
+    /// <summary>
+    /// The listing behind a tool result, or null if the tool didn't return one (a single ticket, a
+    /// project list, an error string) or returned no items at all — with nothing to check against,
+    /// there is nothing to enforce.
+    ///
+    /// Takes the result as it comes back from <c>AIFunction.InvokeAsync</c>, which may hand back
+    /// either the record itself or its serialized form depending on how the function was built, so
+    /// both shapes are read here rather than assumed at the call site.
+    /// </summary>
+    public static Listing? AsListing(object? toolResult)
+    {
+        var groups = toolResult switch
+        {
+            GroupedTickets g => g.Groups.Select(x => (x.Heading, Items: x.Items)).ToList(),
+            JsonElement json => GroupsFromJson(json),
+            JsonNode node => GroupsFromJson(node.Deserialize<JsonElement>()),
+            _ => null
+        };
+
+        if (groups is not { Count: > 0 })
+        {
+            return null;
+        }
+
+        var ids = groups.SelectMany(g => g.Items).Select(IdOf).Where(id => id.Length > 0).ToList();
+        if (ids.Count == 0)
+        {
+            return null;
+        }
+
+        var markdown = string.Join(
+            "\n\n",
+            groups.Select(g => $"**{g.Heading}**\n" + string.Join("\n", g.Items.Select(i => $"- {i}"))));
+
+        return new Listing(ids, markdown);
+    }
+
+    private static List<(string Heading, IReadOnlyList<string> Items)>? GroupsFromJson(JsonElement json)
+    {
+        if (json.ValueKind != JsonValueKind.Object
+            || !json.TryGetProperty("groups", out var groups)
+            || groups.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        var parsed = new List<(string, IReadOnlyList<string>)>();
+        foreach (var group in groups.EnumerateArray())
+        {
+            if (group.ValueKind != JsonValueKind.Object
+                || !group.TryGetProperty("heading", out var heading)
+                || !group.TryGetProperty("items", out var items)
+                || items.ValueKind != JsonValueKind.Array)
+            {
+                continue;
+            }
+
+            parsed.Add((
+                heading.GetString() ?? "",
+                items.EnumerateArray().Select(i => i.GetString() ?? "").Where(i => i.Length > 0).ToList()));
+        }
+
+        return parsed;
+    }
+
+    /// <summary>The id a listing line opens with — "PROJ-1005 · Title — Open, Medium" -> "PROJ-1005".</summary>
+    private static string IdOf(string line)
+    {
+        var separator = line.IndexOf(" · ", StringComparison.Ordinal);
+        return separator > 0 ? line[..separator].Trim() : "";
+    }
+
+    /// <summary>
     /// Carried at the top of every grouped read. Instructions travel with the data rather than
     /// sitting only in the tool description or the system prompt, because that is the one place a
     /// 3B model reliably reads them — the same reason the duplicate guardrail spells out what to do
@@ -97,16 +179,32 @@ public static class TicketTools
     /// returns the whole ticket. Ordered by heading so repeated questions come back the same way.
     /// </summary>
     private static GroupedTickets GroupByKindAndSource(
-        IEnumerable<CanonicalTicket> tickets, ItemTypeScope kinds, SourceScope sources) =>
-        new(GroupedTicketsInstructions,
+        IEnumerable<CanonicalTicket> tickets, ItemTypeScope kinds, SourceScope sources,
+        LanguageScope language)
+    {
+        var words = language.Words;
+        return new(GroupedTicketsInstructions,
             Filter: FilterNote(kinds, sources),
             Groups: tickets.Where(t => kinds.Allows(t.Type) && sources.Allows(t.ProviderName))
-                   .GroupBy(t => (t.TypePlural, t.Source))
+                   .GroupBy(t => (t.TypePlural, Source: SourceName(t.ProviderName, words)))
                    .Select(g => new TicketGroup(
-                       Heading: $"{g.Key.TypePlural} in {g.Key.Source}",
-                       Items: g.Select(Line).ToList()))
+                       Heading: string.Format(words.HeadingPattern, g.Key.TypePlural, g.Key.Source),
+                       Items: g.Select(t => Line(t, words)).ToList()))
                    .OrderBy(g => g.Heading, StringComparer.Ordinal)
                    .ToList());
+    }
+
+    /// <summary>
+    /// A backend's name as the answer should say it. Jira is called Jira in every language; the two
+    /// demo backends carry a warning that they are demo data, and that warning is only useful in a
+    /// language the reader has.
+    /// </summary>
+    private static string SourceName(string providerName, ListingWords words) => providerName switch
+    {
+        "mock-ticketing" => words.MockBoard,
+        "in-memory" => words.InMemory,
+        _ => CanonicalTicket.SourceFor(providerName),
+    };
 
     /// <summary>
     /// What the model is told about the user's filters — spelled out because the scopes have already
@@ -131,19 +229,23 @@ public static class TicketTools
     /// date, shouted when it has passed. Everything else is left out on purpose: whatever a listing
     /// carries is what the model will print.
     /// </summary>
-    private static string Line(CanonicalTicket t)
+    private static string Line(CanonicalTicket t, ListingWords words)
     {
+        // The id, title, status and priority are the backend's own spelling on purpose — they are
+        // what the user matches against their board. Only the words joining them are ours.
         var line = $"{t.Id} · {t.Title} — {StatusText(t.Status)}, {t.Priority}";
 
         if (!string.IsNullOrWhiteSpace(t.Project)
             && !t.Id.StartsWith(t.Project + "-", StringComparison.OrdinalIgnoreCase))
         {
-            line += $", project {t.Project}";
+            line += $", {words.Project} {t.Project}";
         }
 
         if (t.DueAt is { } due)
         {
-            line += IsOverdue(t) ? $", OVERDUE (was due {due:yyyy-MM-dd})" : $", due {due:yyyy-MM-dd}";
+            line += IsOverdue(t)
+                ? $", {string.Format(words.Overdue, due.ToString("yyyy-MM-dd"))}"
+                : $", {words.Due} {due:yyyy-MM-dd}";
         }
 
         return line;
@@ -174,7 +276,8 @@ public static class TicketTools
     /// names/types and the description text are effectively the model's API documentation.
     /// </summary>
     public static IReadOnlyList<AIFunction> Build(
-        ITicketProvider provider, UndoStore undo, ItemTypeScope kinds, SourceScope sources)
+        ITicketProvider provider, UndoStore undo, ItemTypeScope kinds, SourceScope sources,
+        LanguageScope language)
     {
         return
         [
@@ -205,7 +308,7 @@ public static class TicketTools
 
             AIFunctionFactory.Create(
                 async (string query, CancellationToken ct) =>
-                    GroupByKindAndSource(await provider.SearchTicketsAsync(query, ct), kinds, sources),
+                    GroupByKindAndSource(await provider.SearchTicketsAsync(query, ct), kinds, sources, language),
                 name: "search_tickets",
                 description: "Search everything assigned to or raised by the user — tickets, tasks, and " +
                               "any other kind of item — by words in their title, description or labels " +
@@ -226,7 +329,7 @@ public static class TicketTools
                     GroupByKindAndSource(
                         await provider.ListTicketsAsync(
                             ParseEnum<TicketStatus>(status), ParseEnum<TicketPriority>(priority), type, ct),
-                        kinds, sources),
+                        kinds, sources, language),
                 name: "list_tickets",
                 description: "List everything the user raised or is assigned — tickets, tasks, and any " +
                               "other kind of item — optionally filtered by status (Open, InProgress, " +
