@@ -1,6 +1,5 @@
 import { Injectable, signal } from '@angular/core';
 import { StringKey, Strings, de, en, ro } from '../i18n/strings';
-import { prefersReducedMotion } from './theme.service';
 
 export type Lang = 'en' | 'ro' | 'de';
 
@@ -53,10 +52,8 @@ const STORAGE_KEY = 'ta-lang';
  * English on a German machine meant it.
  *
  * `t()` reads the signal, so every template that calls it re-renders on a switch; nothing needs to
- * subscribe or reload. The switch itself crossfades the page (the same View Transitions machinery
- * the theme toggle uses) because unlike a theme change, the text moves — sentences change length
- * and the layout shifts under the reader, which is much easier to follow through a fade than as a
- * jump.
+ * subscribe or reload — which is what lets the switch itself be immediate, with none of the
+ * animation the theme and scheme switches use.
  *
  * The choice also rides on X-Language, so the assistant answers in the same language it is being
  * read in. The debug console stays English on purpose — see i18n/strings.ts.
@@ -82,43 +79,21 @@ export class I18nService {
       : text;
   }
 
+  /**
+   * Deliberately instant, where the theme and scheme switches sweep. Those change colour under text
+   * that stays put, so the reveal is something to watch; this changes the words themselves, and an
+   * animation over text you are trying to read is a delay before you can read it. Snappier is also
+   * more honest here — nothing is being rendered that wasn't already there.
+   */
   set(lang: Lang): void {
     if (lang === this.lang()) return;
-
-    if (prefersReducedMotion()) {
-      this.apply(lang);
-      return;
-    }
-
-    const doc = document as Document & {
-      startViewTransition?: (update: () => void) => { ready: Promise<void> };
-    };
-
-    if (doc.startViewTransition) {
-      const transition = doc.startViewTransition(() => this.apply(lang));
-      void transition.ready.then(() => this.crossfade());
-    } else {
-      this.apply(lang);
-    }
+    this.apply(lang);
   }
 
   private apply(lang: Lang): void {
     this.lang.set(lang);
     document.documentElement.lang = lang;
     localStorage.setItem(STORAGE_KEY, lang);
-  }
-
-  // styles.css turns the default view-transition animation off (the theme toggle's circular reveal
-  // needs that), so the crossfade is driven here instead: the old text dissolves while the new
-  // settles in from just below.
-  private crossfade(): void {
-    const root = document.documentElement;
-    const timing: KeyframeAnimationOptions = { duration: 320, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' };
-    root.animate({ opacity: [1, 0] }, { ...timing, pseudoElement: '::view-transition-old(root)' });
-    root.animate(
-      { opacity: [0, 1], transform: ['translateY(8px)', 'translateY(0)'] },
-      { ...timing, pseudoElement: '::view-transition-new(root)' },
-    );
   }
 
   private initial(): Lang {

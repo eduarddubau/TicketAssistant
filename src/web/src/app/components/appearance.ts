@@ -2,6 +2,7 @@ import { Component, HostListener, inject, signal } from '@angular/core';
 import { ThemeService } from '../services/theme.service';
 import { PALETTES, Palette, PaletteService } from '../services/palette.service';
 import { I18nService } from '../services/i18n.service';
+import { originOf } from '../services/view-transition';
 
 /**
  * How the app looks, as the two questions it actually is: light or dark, and which accent scheme.
@@ -43,7 +44,7 @@ import { I18nService } from '../services/i18n.service';
              (click)="$event.stopPropagation()">
           @for (p of palettes; track p.id) {
             <button class="row" role="radio" [class.on]="palette.palette() === p.id"
-                    [attr.aria-checked]="palette.palette() === p.id" (click)="pick(p.id)">
+                    [attr.aria-checked]="palette.palette() === p.id" (click)="pick(p.id, $event)">
               <span class="coin" [style.background]="p.preview"></span>
               <span class="name">{{ p.label }}</span>
             </button>
@@ -127,15 +128,16 @@ export class Appearance {
     return PALETTES.find((p) => p.id === this.palette.palette()) ?? PALETTES[0];
   }
 
-  // The reveal starts at the button, so the switch reads as coming from the thing that caused it.
+  // Both reveals start at the control that caused them, so the change reads as coming from the
+  // thing that was clicked rather than from nowhere.
   toggleTheme(event: MouseEvent): void {
-    const box = (event.currentTarget as HTMLElement).getBoundingClientRect();
-    this.theme.toggle({ x: box.left + box.width / 2, y: box.top + box.height / 2 });
+    this.theme.toggle(originOf(event));
   }
 
-  pick(palette: Palette): void {
-    this.palette.set(palette);
+  pick(palette: Palette, event: MouseEvent): void {
+    const origin = originOf(event);   // taken before the popover closes and the row is gone
     this.open.set(false);
+    this.palette.set(palette, origin);
   }
 
   toggleOpen(event: Event): void {

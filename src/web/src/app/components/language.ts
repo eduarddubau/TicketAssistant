@@ -92,7 +92,7 @@ export class Language {
   }
 
   pick(lang: Lang): void {
-    this.open.set(false);   // closed before the crossfade, or the popover fades with the page
+    this.open.set(false);
     this.i18n.set(lang);
   }
 

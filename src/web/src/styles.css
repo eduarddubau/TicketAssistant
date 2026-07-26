@@ -234,6 +234,18 @@ button { cursor: pointer; }
   mix-blend-mode: normal;
 }
 
+/* For the length of a reveal, nothing does its own colour transition. Every control in the app
+   declares `transition: 0.15s`, which is transition *all* — so without this they each fade to the
+   new colour on the live DOM while the circle is opening over it, and the sharp edge the reveal is
+   made of dissolves into a general blur. Suppressed here rather than by narrowing each component's
+   transition, because those 150ms fades are right for hover and focus; they are only wrong for the
+   two or three hundred milliseconds when the whole page is being replaced anyway. */
+html.switching *,
+html.switching *::before,
+html.switching *::after {
+  transition: none !important;
+}
+
 /* Where the View Transitions API is missing, the colours blend for a moment instead of snapping.
    The class is on <html> only for the length of the switch. */
 html.theme-transition *,

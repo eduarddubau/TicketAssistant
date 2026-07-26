@@ -1,4 +1,5 @@
 import { Injectable, signal } from '@angular/core';
+import { Origin, revealFrom } from './view-transition';
 
 export type Theme = 'light' | 'dark';
 
@@ -12,10 +13,8 @@ const STORAGE_KEY = 'ta-theme';
  * as data-theme and persisted; the boot script in index.html re-applies it before first paint, which
  * is what stops a reload flashing the other theme.
  *
- * The switch itself is a circular reveal from the toggle button (View Transitions API): the new
- * theme is clipped in over a still frame of the old one, so the eye follows one edge instead of
- * every surface changing at once. Where the API is missing, colours cross-fade instead; where the
- * reader has asked for less motion, it just switches.
+ * The switch itself is the circular reveal in view-transition.ts, shared with the scheme and
+ * language switches.
  */
 @Injectable({ providedIn: 'root' })
 export class ThemeService {
@@ -30,28 +29,13 @@ export class ThemeService {
   }
 
   /** Switch to the other theme. `origin` is where the reveal starts — the button that was clicked. */
-  toggle(origin?: { x: number; y: number }): void {
+  toggle(origin?: Origin): void {
     this.set(this.theme() === 'dark' ? 'light' : 'dark', origin);
   }
 
-  set(theme: Theme, origin?: { x: number; y: number }): void {
-    if (theme === this.theme() || prefersReducedMotion()) {
-      this.apply(theme);
-      return;
-    }
-
-    const doc = document as Document & {
-      startViewTransition?: (update: () => void) => { ready: Promise<void> };
-    };
-
-    if (doc.startViewTransition) {
-      const transition = doc.startViewTransition(() => this.apply(theme));
-      if (origin) void transition.ready.then(() => this.reveal(origin));
-    } else {
-      document.documentElement.classList.add('theme-transition');
-      this.apply(theme);
-      window.setTimeout(() => document.documentElement.classList.remove('theme-transition'), 450);
-    }
+  set(theme: Theme, origin?: Origin): void {
+    if (theme === this.theme()) return;
+    revealFrom(origin, () => this.apply(theme));
   }
 
   private apply(theme: Theme): void {
@@ -60,35 +44,9 @@ export class ThemeService {
     localStorage.setItem(STORAGE_KEY, theme);
   }
 
-  // The circle has to reach the furthest corner from the click, or the old theme is left in a
-  // corner of the screen when the animation ends.
-  private reveal(origin: { x: number; y: number }): void {
-    const radius = Math.hypot(
-      Math.max(origin.x, window.innerWidth - origin.x),
-      Math.max(origin.y, window.innerHeight - origin.y),
-    );
-    document.documentElement.animate(
-      {
-        clipPath: [
-          `circle(0px at ${origin.x}px ${origin.y}px)`,
-          `circle(${radius}px at ${origin.x}px ${origin.y}px)`,
-        ],
-      },
-      {
-        duration: 550,
-        easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
-        pseudoElement: '::view-transition-new(root)',
-      },
-    );
-  }
-
   private initial(): Theme {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored === 'light' || stored === 'dark') return stored;
     return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
   }
-}
-
-export function prefersReducedMotion(): boolean {
-  return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 }

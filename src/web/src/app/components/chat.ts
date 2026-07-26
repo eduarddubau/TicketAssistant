@@ -1,4 +1,4 @@
-import { Component, Input, OnDestroy, OnInit, computed, inject, signal } from '@angular/core';
+import { Component, Input, OnDestroy, OnInit, computed, effect, inject, signal, untracked } from '@angular/core';
 import { ApiService } from '../services/api.service';
 import { ProjectsService } from '../services/projects.service';
 import { DebugService } from '../services/debug.service';
@@ -314,9 +314,48 @@ export class Chat implements OnInit, OnDestroy {
    */
   private convId = '';
 
+  /** The language the greeting on screen is written in, so a switch can tell it's gone stale. */
+  private greetingLang = this.i18n.lang();
+
+  constructor() {
+    // The greeting is minted by the API when the conversation is created, so switching language
+    // leaves it sitting there in the old one — the only thing on screen that didn't move.
+    //
+    // It's re-fetched only while the transcript is still just that greeting, which is the case that
+    // matters: picking a language is something you do on arrival, before typing. Once there are real
+    // turns, they stay as they happened — rewriting what someone already said, or silently dropping
+    // the exchange to get a matching greeting, would both be worse than a first line that is
+    // honestly a record of how the chat opened. New replies come back in the new language either
+    // way, and "New chat" starts clean.
+    effect(() => {
+      const lang = this.i18n.lang();
+      if (lang === this.greetingLang) return;
+      this.greetingLang = lang;
+      untracked(() => { if (!this.started()) void this.reopenGreeting(); });
+    });
+  }
+
   ngOnInit(): void {
     this.convId = this.conversation.conversationId;
     if (this.conversation.greeting) this.push('assistant', this.conversation.greeting);
+  }
+
+  /**
+   * Swaps the untouched opening bubble for one in the language now selected. A whole new
+   * conversation rather than a re-worded bubble: the greeting is also the assistant's first turn in
+   * the history the model sees, and a transcript whose opening line disagrees with what the model
+   * was told it said is exactly what made replies come back in the wrong language.
+   */
+  private async reopenGreeting(): Promise<void> {
+    try {
+      const conv = await this.api.createConversation();
+      if (this.started()) return;          // they started typing while this was in flight
+      this.convId = conv.conversationId;
+      this.log.set([]);
+      if (conv.greeting) this.push('assistant', conv.greeting);
+    } catch {
+      /* the old greeting is still readable; a failed swap isn't worth an error bubble */
+    }
   }
 
   ngOnDestroy(): void {

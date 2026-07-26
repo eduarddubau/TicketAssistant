@@ -1,4 +1,5 @@
 import { Injectable, signal } from '@angular/core';
+import { Origin, revealFrom } from './view-transition';
 
 export type Palette = 'violet' | 'indigo' | 'emerald' | 'rose' | 'slate';
 
@@ -30,7 +31,13 @@ const IDS = PALETTES.map((p) => p.id);
 export class PaletteService {
   readonly palette = signal<Palette>(this.initial());
 
-  set(palette: Palette): void {
+  /** `origin` is where the reveal starts — the swatch that was clicked. */
+  set(palette: Palette, origin?: Origin): void {
+    if (palette === this.palette()) return;
+    revealFrom(origin, () => this.apply(palette));
+  }
+
+  private apply(palette: Palette): void {
     this.palette.set(palette);
     if (palette === 'violet') {
       document.documentElement.removeAttribute('data-palette');
